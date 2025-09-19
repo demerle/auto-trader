@@ -1,5 +1,7 @@
 //@version=6
 
+//This file is copied from TradingView for general reference of how the chandelier exit algorithm works.
+
 indicator('Chandelier Exit', shorttitle = 'CE', overlay = true)
 
 const string calcGroup = 'Calculation'
