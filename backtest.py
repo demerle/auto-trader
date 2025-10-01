@@ -3,7 +3,7 @@ import alpaca_trade_api as tradeapi
 from alpaca.trading.client import TradingClient
 from dotenv import load_dotenv
 import os
-import chandelier_exit
+from chandelier_exit import chandelier_exit
 
 load_dotenv()
 
@@ -33,8 +33,10 @@ print(df)
 #Giving the df to the algorithm of choice
 buy_idx, sell_idx, dir = chandelier_exit(df)
 
+#type of buy_idx - numpy.ndarray
 print("Buy signals at indices:", buy_idx)
 print("Sell signals at indices:", sell_idx)
+print("type:", type(buy_idx))
 
 buy = False
 sell = False
