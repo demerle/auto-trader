@@ -1,0 +1,9 @@
+services:
+  stock-api:
+    build: .
+    container_name: stock-signal-api
+    ports:
+      - "8005:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
