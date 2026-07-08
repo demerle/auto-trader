@@ -36,11 +36,11 @@ def get_buy_sell_signals(list_of_tickers, data_range="1y", interval="1d") -> dic
         match res:
             case Success((fast, slow, mom)):
                 if mom["momentum_pct"] > 0:
-                    if fast["fast_k"] > 80 and slow["slow_k"] > 80 and slow["slow_d"] > 75:
+                    if fast["fast_k"] > 80 and slow["slow_k"] > 80 and slow["slow_k"] < slow["slow_d"]:
                         signal["sell"].append(_build_entry(ticker, fast, slow, mom))
                         print(f"{ticker} SELL SIGNAL: FastK = {fast['fast_k']:.2f}%, SlowK = {slow['slow_k']:.2f}%")
                 else:
-                    if fast["fast_k"] < 20 and slow["slow_k"] < 20 and slow["slow_d"] < 25:
+                    if fast["fast_k"] < 20 and slow["slow_k"] < 20 and slow["slow_k"] > slow["slow_d"]:
                         signal["buy"].append(_build_entry(ticker, fast, slow, mom))
                         print(f"{ticker} BUY SIGNAL: FastK = {fast['fast_k']:.2f}%, SlowK = {slow['slow_k']:.2f}%")
             case Failure(err):
