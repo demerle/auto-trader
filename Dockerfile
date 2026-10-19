@@ -1,28 +1,20 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+
+RUN useradd -u 1000 -m appuser && mkdir -p /app/data && chown -R appuser:appuser /app
 WORKDIR /app
-
-# Install system dependencies if any are needed in the future
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create a non-root user and configure the working directory
-RUN useradd -u 1000 -m appuser && chown -R appuser:appuser /app
-
-# Switch to the non-root user
 USER appuser
-ENV PATH="/home/appuser/.local/bin:${PATH}"
 
-# Copy requirements and install packages
-COPY --chown=appuser:appuser requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+ENV UV_PROJECT_ENVIRONMENT=/home/appuser/venv \
+    PATH="/home/appuser/venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
 
-# Copy all source files
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
 COPY --chown=appuser:appuser . .
+RUN uv sync --frozen --no-dev
 
-# Expose port
 EXPOSE 8000
-
-# Run uvicorn server
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "autotrader.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
