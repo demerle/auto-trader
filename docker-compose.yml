@@ -81,6 +81,8 @@ services:
       AT_OPENCODE_AUTH_FILE: /run/secrets/opencode-auth.json
       AT_NTFY_URL: ${AT_NTFY_URL:-}
       AT_DISCORD_WEBHOOK: ${AT_DISCORD_WEBHOOK:-}
+      AT_DISCORD_BOT_TOKEN: ${AT_DISCORD_BOT_TOKEN:-}  # orchestrator only; opencode never sees it
+      AT_DISCORD_USER_ID: ${AT_DISCORD_USER_ID:-}
     volumes:
       - bars:/app/data
       - ./workspace:/app/workspace

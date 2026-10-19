@@ -50,5 +50,5 @@ def sent_alerts(monkeypatch) -> list[tuple[str, str]]:
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(alerts, "_record", lambda title, message, priority: None)
     monkeypatch.setattr(alerts, "_deliver", lambda title, message, priority: sent.append((title, message)))
-    monkeypatch.setattr(alerts, "post_discord", lambda url, payload, tries=3: sent.append(("discord", payload)))
+    monkeypatch.setattr(alerts, "post_discord", lambda url, payload, tries=3, headers=None: sent.append(("discord", payload)))
     return sent

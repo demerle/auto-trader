@@ -233,9 +233,20 @@ def alerts_test() -> None:
     from autotrader.config import get_settings
 
     s = get_settings()
-    channels = [n for n, v in (("discord", s.discord_webhook), ("ntfy", s.ntfy_url)) if v]
+    dm = bool(s.discord_bot_token and s.discord_user_id)
+    channels = [n for n, v in (("Discord DM", dm), ("Discord webhook", s.discord_webhook and not dm),
+                               ("ntfy", s.ntfy_url)) if v]
     if not channels:
-        raise typer.BadParameter("no channel configured: set AT_DISCORD_WEBHOOK in .env")
+        raise typer.BadParameter("nothing configured: set AT_DISCORD_BOT_TOKEN and AT_DISCORD_USER_ID "
+                                 "(or AT_DISCORD_WEBHOOK) in .env")
+    if dm:  # deliver directly so a failure is shown here instead of only logged
+        from autotrader.alerts import send_discord
+
+        send_discord({"content": "**Autotrader test**\nIf you can read this, DMs reach you."})
+        channels.remove("Discord DM")
+        typer.echo("Discord DM sent")
+        if not channels:
+            return
     alert("Autotrader test alert", "If you can read this, alerts reach you.")
     typer.echo(f"sent to {', '.join(channels)}")
 

@@ -284,7 +284,7 @@ def test_discord_waits_out_rate_limit(monkeypatch):
                 raise RuntimeError(self.status_code)
 
     codes = iter([429, 204])
-    monkeypatch.setattr(alerts_mod.httpx, "post", lambda url, json, timeout: calls.append(json) or Resp(next(codes)))
+    monkeypatch.setattr(alerts_mod.httpx, "post", lambda url, json, timeout, headers: calls.append(json) or Resp(next(codes)))
     monkeypatch.setattr(alerts_mod.time, "sleep", sleeps.append)
     REAL_POST_DISCORD("https://discord.test/hook", {"content": "hi"})
     assert len(calls) == 2 and sleeps == [0.5]
@@ -358,3 +358,34 @@ def test_render_helpers_escape():
     svg = line_chart([("a<b", [("2026-01-01", 1.0), ("2026-01-02", 2.0)])])
     assert "<svg" in svg and "a&lt;b" in svg
     assert "Not enough data" in line_chart([("a", [("2026-01-01", 1.0)])])
+
+
+def test_bot_token_sends_a_dm(monkeypatch, settings_env):
+    from autotrader.config import get_settings
+
+    monkeypatch.setenv("AT_DISCORD_BOT_TOKEN", "bot-secret")
+    monkeypatch.setenv("AT_DISCORD_USER_ID", "42")
+    get_settings.cache_clear()
+    alerts_mod._dm_channel.clear()
+    calls = []
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"id": "dm-7"}
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(alerts_mod.httpx, "post",
+                        lambda url, json, timeout, headers: calls.append((url, json, headers)) or Resp())
+    monkeypatch.setattr(alerts_mod, "post_discord", REAL_POST_DISCORD)
+    alerts_mod.send_discord({"content": "a"})
+    alerts_mod.send_discord({"content": "b"})
+    urls = [u for u, _, _ in calls]
+    assert urls == [f"{alerts_mod.DISCORD_API}/users/@me/channels",
+                    f"{alerts_mod.DISCORD_API}/channels/dm-7/messages",
+                    f"{alerts_mod.DISCORD_API}/channels/dm-7/messages"]  # DM channel opened once
+    assert calls[0][1] == {"recipient_id": "42"}
+    assert all(h == {"Authorization": "Bot bot-secret"} for _, _, h in calls)

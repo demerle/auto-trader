@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     ntfy_url: str | None = None  # e.g. https://ntfy.sh/<your-private-topic>
     discord_webhook: str | None = None  # https://discord.com/api/webhooks/<id>/<token>
+    # Or DMs from your own bot (takes precedence over the webhook). The bot must share a server with you.
+    discord_bot_token: str | None = None
+    discord_user_id: str | None = None
 
     # Dashboard (phase 6). It refuses to serve pages without a token.
     dashboard_token: str | None = None

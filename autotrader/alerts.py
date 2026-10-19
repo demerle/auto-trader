@@ -39,19 +39,44 @@ def _deliver(title: str, message: str, priority: str) -> None:
         if s.ntfy_url:
             httpx.post(s.ntfy_url, content=message.encode(), timeout=10,
                        headers={"Title": title, "Priority": priority, "Tags": "chart_with_upwards_trend"})
-        if s.discord_webhook:
+        if discord_configured():
             text = f"**{title}**\n{message}"
             if len(text) > DISCORD_CONTENT_MAX:
                 text = text[:DISCORD_CONTENT_MAX - 1] + "…"
-            post_discord(s.discord_webhook, {"content": text})
+            send_discord({"content": text})
     except Exception:  # noqa: BLE001 - alerts are best effort
         log.exception("alert delivery failed")
 
 
-def post_discord(url: str, payload: dict, tries: int = 3) -> None:
-    """POST to a Discord webhook, waiting out rate limits (HTTP 429)."""
+DISCORD_API = "https://discord.com/api/v10"
+_dm_channel: dict[str, str] = {}
+
+
+def discord_configured() -> bool:
+    s = get_settings()
+    return bool((s.discord_bot_token and s.discord_user_id) or s.discord_webhook)
+
+
+def send_discord(payload: dict) -> None:
+    """A DM from the bot when a bot token and user id are set, else the webhook."""
+    s = get_settings()
+    if s.discord_bot_token and s.discord_user_id:
+        auth = {"Authorization": f"Bot {s.discord_bot_token}"}
+        channel = _dm_channel.get(s.discord_user_id)
+        if channel is None:
+            r = httpx.post(f"{DISCORD_API}/users/@me/channels", json={"recipient_id": s.discord_user_id},
+                           headers=auth, timeout=10)
+            r.raise_for_status()
+            channel = _dm_channel[s.discord_user_id] = r.json()["id"]
+        post_discord(f"{DISCORD_API}/channels/{channel}/messages", payload, headers=auth)
+    elif s.discord_webhook:
+        post_discord(s.discord_webhook, payload)
+
+
+def post_discord(url: str, payload: dict, tries: int = 3, headers: dict | None = None) -> None:
+    """POST to Discord, waiting out rate limits (HTTP 429)."""
     for attempt in range(tries):
-        r = httpx.post(url, json=payload, timeout=10)
+        r = httpx.post(url, json=payload, timeout=10, headers=headers or {})
         if r.status_code == 429 and attempt < tries - 1:
             try:
                 wait = float(r.json().get("retry_after", 1.0))
@@ -84,9 +109,9 @@ def split_text(text: str, limit: int = DISCORD_CHUNK) -> list[str]:
 
 
 def post_report(title: str, body_md: str, url: str | None = None) -> bool:
-    """Post a long markdown text to Discord as embeds, one per message. False if not configured."""
-    hook = get_settings().discord_webhook
-    if not hook:
+    """Post a long markdown text to Discord (DM or webhook) as embeds, one per message.
+    False if Discord is not configured."""
+    if not discord_configured():
         return False
     chunks = split_text(body_md)
     for i, chunk in enumerate(chunks):
@@ -97,5 +122,5 @@ def post_report(title: str, body_md: str, url: str | None = None) -> bool:
                 embed["url"] = url
         if len(chunks) > 1:
             embed["footer"] = {"text": f"{i + 1}/{len(chunks)}"}
-        post_discord(hook, {"embeds": [embed]})
+        send_discord({"embeds": [embed]})
     return True
