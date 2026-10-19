@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<h1>Daily reports</h1>
+<div class="card table-wrap"><table>
+<tr><th>Date</th><th>Posted to Discord</th><th>Supervisor</th></tr>
+{% for r in rows %}<tr><td><a href="/reports/{{ r.date }}">{{ r.date }}</a></td><td>{{ "yes" if r.posted else "–" }}</td><td>{{ "yes" if r.commentary else "–" }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">No reports yet. The engine writes one after each day's evaluation (16:30 ET).</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field, chip, budget_bars with context %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+{% if acct.killed %}
+<div class="banner kill">KILL SWITCH ON — {{ acct.kill_reason }} ({{ acct.kill_at | when }}). The engine is not trading.</div>
+{% endif %}
+{% if agents.paused %}
+<div class="banner warn">Agents paused: {{ agents.paused.reason }} — <a href="/agents">resume on the Agents page</a></div>
+{% endif %}
+<div class="grid">
+  <div class="card stat"><div class="label">Arena equity</div><div class="value">{{ acct.equity | money }}</div>
+    <div class="sub">capital allocated {{ acct.capital | money }}</div></div>
+  <div class="card stat"><div class="label">Today</div>
+    <div class="value {{ acct.day_pnl | sign }}">{{ acct.day_pnl | money(true) }}</div>
+    <div class="sub {{ acct.day_return | sign }}">{{ acct.day_return | pct }}</div></div>
+  <div class="card stat"><div class="label">Slots</div>
+    <div class="value">{{ agents.slots.bots }} / {{ agents.slots.total }}</div>
+    <div class="sub">{{ agents.slots.in_flight }} in research · {{ agents.slots.open }} open</div></div>
+  <div class="card stat"><div class="label">Agent budget</div>{{ budget_bars(agents.budget) }}</div>
+</div>
+
+<div class="cols">
+  <div>
+    <h2>League leaders <a class="small" href="/league">full table →</a></h2>
+    <div class="card table-wrap"><table>
+      <tr><th>Bot</th><th>Stage</th><th class="num">Days</th><th class="num">Return</th><th class="num">vs SPY</th><th class="num">Sharpe</th></tr>
+      {% for r in league %}
+      <tr class="{{ 'hl' if r.live_eligible }}"><td><a href="/bots/{{ r.slug }}">{{ r.slug }}</a> <span class="muted small">{{ r.interval }}</span></td>
+        <td>{{ chip(r.stage) }}</td><td class="num">{{ r.days }}</td>
+        <td class="num {{ r.total_return | sign }}">{{ r.total_return | pct }}</td>
+        <td class="num {{ r.excess_return | sign }}">{{ r.excess_return | pct }}</td>
+        <td class="num">{{ r.sharpe | fnum }}</td></tr>
+      {% else %}<tr><td colspan="6" class="muted">No bots under evaluation.</td></tr>{% endfor %}
+    </table></div>
+
+    {% if report %}
+    <h2>Latest report: <a href="/reports/{{ report.date }}">{{ report.date }}</a></h2>
+    <div class="card report">{{ report.body_md | markdown }}
+      {% if report.commentary %}<h3>Supervisor</h3>{{ report.commentary | markdown }}{% endif %}</div>
+    {% endif %}
+  </div>
+  <div>
+    <h2>Controls</h2>
+    <div class="card">
+      {% if acct.killed %}
+      <form method="post" action="/actions/unkill" data-confirm="Turn the kill switch off? The engine will trade again on its next tick.">
+        {{ csrf_field() }}<button type="submit">Turn kill switch off</button></form>
+      {% else %}
+      <form method="post" action="/actions/kill" data-confirm="KILL SWITCH: cancel every order and flatten every bot's positions now?">
+        {{ csrf_field() }}
+        <div class="actions"><input name="reason" placeholder="Reason" maxlength="200">
+        <input name="confirm" placeholder="Type KILL" required pattern="[Kk][Ii][Ll][Ll]" size="9">
+        <button type="submit" class="danger">Kill switch</button></div>
+        <p class="muted small">Cancels all orders and flattens every position on the paper account.</p>
+      </form>
+      {% endif %}
+    </div>
+    <h2>Recent agent jobs <a class="small" href="/agents">all →</a></h2>
+    <div class="card table-wrap"><table>
+      {% for j in agents.jobs %}
+      <tr><td><a href="/agents/jobs/{{ j.id }}">#{{ j.id }}</a></td><td>{{ j.agent }}</td><td>{{ chip(j.status) }}</td>
+        <td class="num">${{ "%.3f" | format(j.cost_usd) }}</td></tr>
+      {% else %}<tr><td class="muted">No jobs yet.</td></tr>{% endfor %}
+    </table></div>
+    <h2>Alerts <a class="small" href="/audit">all →</a></h2>
+    <div class="card">
+      {% for a in alerts %}
+      <div class="small"><span class="muted">{{ a.ts | when }}</span> <strong>{{ a.title }}</strong></div>
+      <div class="small muted" style="margin-bottom:8px">{{ a.message | truncate(220) }}</div>
+      {% else %}<span class="muted">No alerts.</span>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

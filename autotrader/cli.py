@@ -112,19 +112,13 @@ def bots_sync() -> None:
 @bots_app.command("list")
 def bots_list() -> None:
     """Show each bot's stage, equity (at last tick) and positions."""
-    from sqlalchemy import select
+    from autotrader.views import roster
 
-    from autotrader.db.models import Bot, EquitySnapshot
-    from autotrader.db.session import session_factory
-
-    with session_factory()() as session:
-        for bot in session.scalars(select(Bot).order_by(Bot.id)).all():
-            snap = session.scalars(select(EquitySnapshot).where(EquitySnapshot.bot_id == bot.id)
-                                   .order_by(EquitySnapshot.ts.desc()).limit(1)).first()
-            eq = f"${snap.equity:,.2f}" if snap else "-"
-            pos = {k: v for k, v in (snap.positions if snap else {}).items()}
-            typer.echo(f"{bot.slug:18} {bot.strategy.name}@{bot.strategy.version:3} "
-                       f"{bot.stage.value:16} equity {eq:>12}  {pos}")
+    with _sessions()() as session:
+        rows = roster(session)
+    for r in rows:
+        eq = f"${r['equity']:,.2f}" if r["equity"] is not None else "-"
+        typer.echo(f"{r['slug']:18} {r['strategy']:24} {r['stage']:16} equity {eq:>12}  {r['positions']}")
 
 
 @app.command()
@@ -191,39 +185,59 @@ def evaluate(dry_run: bool = typer.Option(False, help="Show verdicts without app
 @app.command()
 def league() -> None:
     """Rank active bots by their paper record."""
-    from sqlalchemy import select
-
-    from autotrader.db.models import Bot
     from autotrader.evaluator.jobs import spy_daily_returns
-    from autotrader.evaluator.record import build_record
-    from autotrader.evaluator.run import EVALUATED_STAGES
+    from autotrader.views import league as league_rows
 
     spy = spy_daily_returns(BarArchive(), pd.Timestamp.now(tz="UTC"))
     with _sessions()() as session:
-        rows = []
-        for bot in session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES))).all():
-            rec = build_record(session, bot, spy)
-            rows.append((rec.metrics.get("sharpe", 0.0), bot, rec))
+        rows = league_rows(session, spy)
     typer.echo(f"{'bot':18} {'stage':16} {'days':>4} {'trades':>6} {'return':>8} {'vsSPY':>8} "
                f"{'sharpe':>7} {'psr':>5} {'maxDD':>7} {'capital':>9}")
-    for _, bot, rec in sorted(rows, key=lambda r: r[0], reverse=True):
-        m = rec.metrics
-        typer.echo(f"{bot.slug:18} {bot.stage.value:16} {rec.days:4d} {rec.trades:6d} "
-                   f"{m.get('total_return', 0):8.2%} {m.get('excess_return', 0):8.2%} "
-                   f"{m.get('sharpe', 0):7.2f} {m.get('psr', 0):5.2f} {m.get('max_drawdown', 0):7.2%} "
-                   f"{bot.capital:9,.0f}")
+    for r in rows:
+        v = {k: r[k] or 0.0 for k in ("total_return", "excess_return", "sharpe", "psr", "max_drawdown")}
+        typer.echo(f"{r['slug']:18} {r['stage']:16} {r['days']:4d} {r['trades']:6d} "
+                   f"{v['total_return']:8.2%} {v['excess_return']:8.2%} {v['sharpe']:7.2f} "
+                   f"{v['psr']:5.2f} {v['max_drawdown']:7.2%} {r['capital']:9,.0f}")
 
 
 @app.command()
 def graveyard() -> None:
     """Eradicated bots and why they died."""
-    from sqlalchemy import select
-
-    from autotrader.db.models import Bot, BotStage
+    from autotrader.views import graveyard as graveyard_rows
 
     with _sessions()() as session:
-        for bot in session.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED)).all():
-            typer.echo(f"{bot.stage_since:%Y-%m-%d} {bot.slug}: {bot.notes}\n")
+        for r in graveyard_rows(session):
+            typer.echo(f"{r['died'][:10]} {r['slug']}: {r['autopsy']}\n")
+
+
+@app.command()
+def report(date: str = typer.Option(None, help="ET date (YYYY-MM-DD); default today"),
+           post: bool = typer.Option(False, help="Post to Discord if not posted yet")) -> None:
+    """Build (or rebuild) the daily report and print it."""
+    from autotrader.reports.daily import publish_daily_report
+
+    rep = publish_daily_report(_sessions(), BarArchive(), date, post=post)
+    typer.echo(rep.body_md)
+    if rep.commentary:
+        typer.echo(f"\n## Supervisor\n{rep.commentary}")
+
+
+alerts_app = typer.Typer(help="Alert delivery (Discord / ntfy).", no_args_is_help=True)
+app.add_typer(alerts_app, name="alerts")
+
+
+@alerts_app.command("test")
+def alerts_test() -> None:
+    """Send a test alert to every configured channel."""
+    from autotrader.alerts import alert
+    from autotrader.config import get_settings
+
+    s = get_settings()
+    channels = [n for n, v in (("discord", s.discord_webhook), ("ntfy", s.ntfy_url)) if v]
+    if not channels:
+        raise typer.BadParameter("no channel configured: set AT_DISCORD_WEBHOOK in .env")
+    alert("Autotrader test alert", "If you can read this, alerts reach you.")
+    typer.echo(f"sent to {', '.join(channels)}")
 
 
 @app.command()
@@ -313,27 +327,19 @@ def orchestrator(
 @agents_app.command("status")
 def agents_status() -> None:
     """Slots, budget and the job queue at a glance."""
-    from sqlalchemy import func, select
-
-    from autotrader.db.models import AgentJob
-    from autotrader.orchestrator import budget, slots
+    from autotrader.views import agents_overview
 
     sessions, archive, cfg, policy = _agents_ctx()
-    from autotrader.engine.state import get_state
-    from autotrader.orchestrator.loop import PAUSED
-
     with sessions() as s:
-        if paused := get_state(s, PAUSED):
-            typer.echo(f"PAUSED: {paused.get('reason')}")
-        active = slots.active_bots(s)
-        typer.echo(f"slots: {len(active)}/{policy.slots} bots, {slots.in_flight(s)} in research, "
-                   f"{slots.open_slots(s, policy)} open")
-        chk = budget.check(s, "researcher", cfg)
-        typer.echo(f"budget: {chk}  (next researcher ~${chk.estimate:.2f})")
-        counts = s.execute(select(AgentJob.agent, AgentJob.status, func.count())
-                           .group_by(AgentJob.agent, AgentJob.status)).all()
-        for agent, status, n in sorted(counts):
-            typer.echo(f"  {agent:10} {status:10} {n}")
+        o = agents_overview(s, cfg, policy)
+    if o["paused"]:
+        typer.echo(f"PAUSED: {o['paused'].get('reason')}")
+    sl = o["slots"]
+    typer.echo(f"model: {o['model']}")
+    typer.echo(f"slots: {sl['bots']}/{sl['total']} bots, {sl['in_flight']} in research, {sl['open']} open")
+    typer.echo(f"budget: {o['budget']['text']}  (next researcher ~${o['budget']['estimate']:.2f})")
+    for c in o["counts"]:
+        typer.echo(f"  {c['agent']:10} {c['status']:10} {c['n']}")
 
 
 @agents_app.command("jobs")
@@ -375,24 +381,18 @@ def agents_queue(role: str = typer.Argument("researcher"),
                  slug: str = typer.Option(None, help="Bot to review (reviewer)"),
                  note: str = typer.Option("", help="Extra instructions for the agent")) -> None:
     """Queue a researcher (or reviewer) job by hand."""
-    from autotrader.db.models import AgentJob
-    from autotrader.orchestrator.slots import research_prompt
+    from autotrader.orchestrator import control
 
     with _agent_sessions()() as s:
-        if role == "researcher":
-            job = AgentJob(agent=role, model="", target={"interval": interval, "reason": "queued by hand"},
-                           prompt=research_prompt(interval, "queued by hand", note))
-        elif role == "reviewer" and slug:
-            from sqlalchemy import select
-
-            from autotrader.db.models import Bot
-
-            bot = s.scalars(select(Bot).where(Bot.slug == slug)).one()
-            job = AgentJob(agent=role, model="", bot_id=bot.id, target={"slug": slug},
-                           prompt=f"Review of {slug} requested by hand. {note}")
-        else:
-            raise typer.BadParameter("role must be researcher, or reviewer with --slug")
-        s.add(job)
+        try:
+            if role == "researcher":
+                job = control.queue_research(s, interval, note)
+            elif role == "reviewer" and slug:
+                job = control.queue_review(s, slug, note)
+            else:
+                raise typer.BadParameter("role must be researcher, or reviewer with --slug")
+        except control.ControlError as exc:
+            raise typer.BadParameter(str(exc)) from None
         s.commit()
         typer.echo(f"queued job {job.id}")
 
@@ -421,30 +421,36 @@ def agents_auth_export(out: Path = typer.Option(Path("secrets/opencode-go.json")
 
 @agents_app.command("resume")
 def agents_resume() -> None:
-    """Resume the orchestrator after it paused itself (e.g. an expired OpenCode key)."""
-    from autotrader.db.models import SystemState
-    from autotrader.orchestrator.loop import PAUSED
+    """Resume the orchestrator after it paused (e.g. an expired OpenCode key, or by hand)."""
+    from autotrader.orchestrator import control
 
     with _agent_sessions()() as s:
-        row = s.get(SystemState, PAUSED)
-        if row is None:
-            typer.echo("not paused")
-            return
-        s.delete(row)
+        resumed = control.resume(s)
         s.commit()
-    typer.echo("resumed")
+    typer.echo("resumed" if resumed else "not paused")
+
+
+@agents_app.command("pause")
+def agents_pause(reason: str = typer.Option("paused by hand", help="Shown in status")) -> None:
+    """Stop starting new agent jobs (a running job finishes)."""
+    from autotrader.orchestrator import control
+
+    with _agent_sessions()() as s:
+        control.pause(s, reason)
+        s.commit()
+    typer.echo("paused")
 
 
 @agents_app.command("cancel")
 def agents_cancel(job_id: int) -> None:
     """Cancel a queued job."""
-    from autotrader.db.models import AgentJob
+    from autotrader.orchestrator import control
 
     with _agent_sessions()() as s:
-        job = s.get(AgentJob, job_id)
-        if job is None or job.status != "queued":
-            raise typer.BadParameter("only queued jobs can be cancelled")
-        job.status = "cancelled"
+        try:
+            control.cancel_job(s, job_id)
+        except control.ControlError as exc:
+            raise typer.BadParameter(str(exc)) from None
         s.commit()
     typer.echo(f"cancelled job {job_id}")
 

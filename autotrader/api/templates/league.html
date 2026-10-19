@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import chip with context %}
+{% block title %}League{% endblock %}
+{% block content %}
+<h1>League</h1>
+<p class="muted small">Bots under evaluation, by paper record. Highlighted rows are live-eligible. Click a column to sort.</p>
+<div class="card table-wrap"><table>
+<tr>
+  <th>#</th><th>Bot</th><th>Strategy</th><th>Stage</th>
+  {% for key, label in [("days","Days"),("trades","Trades"),("total_return","Return"),("excess_return","vs SPY"),("sharpe","Sharpe"),("psr","PSR"),("max_drawdown","Max DD"),("capital","Capital")] %}
+  <th class="num"><a href="?sort={{ key }}">{{ label }}{{ " ▾" if sort == key }}</a></th>
+  {% endfor %}
+</tr>
+{% for r in rows %}
+<tr class="{{ 'hl' if r.live_eligible }}">
+  <td class="muted">{{ loop.index }}</td>
+  <td><a href="/bots/{{ r.slug }}">{{ r.slug }}</a></td>
+  <td>{{ r.strategy }} <span class="muted small">{{ r.interval }}{{ " · agent" if r.author.startswith("job-") }}</span></td>
+  <td>{{ chip(r.stage) }}</td>
+  <td class="num">{{ r.days }}</td><td class="num">{{ r.trades }}</td>
+  <td class="num {{ r.total_return | sign }}">{{ r.total_return | pct }}</td>
+  <td class="num {{ r.excess_return | sign }}">{{ r.excess_return | pct }}</td>
+  <td class="num">{{ r.sharpe | fnum }}</td><td class="num">{{ r.psr | fnum }}</td>
+  <td class="num">{{ r.max_drawdown | pct(false) }}</td><td class="num">{{ r.capital | money }}</td>
+</tr>
+{% else %}<tr><td colspan="12" class="muted">No bots under evaluation.</td></tr>{% endfor %}
+</table></div>
+
+<h2>All bots</h2>
+<div class="card table-wrap"><table>
+<tr><th>Bot</th><th>Strategy</th><th>Stage</th><th class="num">Equity</th><th>Positions</th></tr>
+{% for r in roster %}
+<tr><td><a href="/bots/{{ r.slug }}">{{ r.slug }}</a>{% if r.paused_until %} <span class="chip">paused</span>{% endif %}</td>
+  <td>{{ r.strategy }} <span class="muted small">{{ r.interval }}</span></td><td>{{ chip(r.stage) }}</td>
+  <td class="num">{{ r.equity | money }}</td>
+  <td class="small">{% for s, q in r.positions.items() %}{{ s }} {{ q | fnum(0) }}{{ ", " if not loop.last }}{% else %}<span class="muted">flat</span>{% endfor %}</td></tr>
+{% endfor %}
+</table></div>
+{% endblock %}

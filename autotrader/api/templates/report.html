@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Report {{ report.date }}{% endblock %}
+{% block content %}
+<h1>Arena report {{ report.date }}</h1>
+<div class="card report">{{ report.body_md | markdown }}</div>
+<h2>Supervisor</h2>
+<div class="card report">{% if report.commentary %}{{ report.commentary | markdown }}{% else %}<span class="muted">No commentary yet.</span>{% endif %}</div>
+<p class="muted small">{{ "Posted to Discord " ~ (report.posted_at | when) if report.posted_at else "Not posted to Discord." }}</p>
+{% endblock %}

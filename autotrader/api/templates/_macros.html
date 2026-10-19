@@ -1,0 +1,9 @@
+{% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
+{% macro chip(v) %}<span class="chip {{ v }}">{{ v | replace('_', ' ') }}</span>{% endmacro %}
+{% macro budget_bars(b) %}
+{% for w, label in [("five_hours","5 hours"),("week","7 days"),("month","30 days")] %}
+  {% set used = b.spend[w] %}{% set lim = b.limits[w] %}{% set frac = (used / lim) if lim else 0 %}
+  <div class="small">{{ label }}: ${{ "%.2f" | format(used) }} of ${{ "%.2f" | format(lim) }}</div>
+  <div class="bar"><i class="{{ 'hot' if frac >= 0.8 }}" style="width: {{ [frac * 100, 100] | min }}%"></i></div>
+{% endfor %}
+{% endmacro %}

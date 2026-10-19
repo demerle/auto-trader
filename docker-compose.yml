@@ -37,7 +37,7 @@ services:
     <<: *app
     container_name: autotrader-api
     ports:
-      - "8005:8000"
+      - "127.0.0.1:8005:8000"  # this machine only; use an SSH tunnel or Tailscale from elsewhere
     volumes:
       - bars:/app/data
       - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro

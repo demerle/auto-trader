@@ -1,8 +1,8 @@
 # Strategy-research agents (opencode on OpenCode Go). Human-owned: agents cannot edit this.
 
-# The ONE model every agent call uses (researcher, auditor, reviewer, and opencode's own
-# background calls such as titles). Nothing else is ever used: there are no per-role models
-# and no fallbacks. To switch, change this line (`opencode models` lists the options);
+# The ONE model every agent call uses (researcher, auditor, reviewer, supervisor, and
+# opencode's own background calls such as titles). Nothing else is ever used: there are no
+# per-role models and no fallbacks. To switch, change this line (`opencode models` lists the options);
 # the orchestrator picks it up on its next job, no rebuild needed.
 model: opencode-go/glm-5.3-flash
 
@@ -13,9 +13,9 @@ budget:                        # the arena's own spend, USD (half of the Go plan
   go_caps: {five_hours: 12.0, week: 30.0, month: 60.0}
   go_guard: 0.9                # never push *total* Go usage (incl. yours) past 90% of a cap
   alert_at: 0.8
-  seed_estimates: {researcher: 1.5, auditor: 0.4, reviewer: 0.1}
+  seed_estimates: {researcher: 1.5, auditor: 0.4, reviewer: 0.1, supervisor: 0.02}
 
-timeouts_min: {researcher: 45, auditor: 15, reviewer: 10}
+timeouts_min: {researcher: 45, auditor: 15, reviewer: 10, supervisor: 5}
 max_attempts: 2
 concurrency: 1
 
@@ -33,5 +33,6 @@ review:
   weekday: 5                   # Saturday
   min_window_frac: 0.5         # bots with at least half their evaluation window
 
+daily_commentary: true         # supervisor comments on each daily report (Discord follow-up)
 auto_commit: true              # git-commit deployed strategies (when running in a work tree)
 sandbox_memory_mb: 3072

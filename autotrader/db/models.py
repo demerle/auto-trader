@@ -250,3 +250,42 @@ class CashFlow(Base):
     ts: Mapped[datetime] = mapped_column(default=utcnow)
     amount: Mapped[float] = mapped_column(Float)
     reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class Alert(Base):
+    """Every alert sent (also pushed to Discord/ntfy), for the dashboard's feed."""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    message: Mapped[str] = mapped_column(Text, default="")
+    priority: Mapped[str] = mapped_column(String(16), default="default")
+
+
+class Report(Base):
+    """The daily report, built after the evaluation; the supervisor agent adds commentary."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[str] = mapped_column(String(10), unique=True)  # ET session date
+    body_md: Mapped[str] = mapped_column(Text)
+    data: Mapped[dict] = mapped_column(default=dict)
+    commentary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    posted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    commentary_posted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AuditLog(Base):
+    """Actions taken from the dashboard."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(default=utcnow)
+    action: Mapped[str] = mapped_column(String(40))
+    target: Mapped[str] = mapped_column(String(120), default="")
+    detail: Mapped[dict] = mapped_column(default=dict)

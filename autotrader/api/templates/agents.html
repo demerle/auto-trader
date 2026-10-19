@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field, chip, budget_bars with context %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<h1>Agents <span class="muted small">model {{ o.model }}</span></h1>
+{% if o.paused %}<div class="banner warn">Paused: {{ o.paused.reason }}</div>{% endif %}
+<div class="grid">
+  <div class="card stat"><div class="label">Slots</div><div class="value">{{ o.slots.bots }} / {{ o.slots.total }}</div>
+    <div class="sub">{{ o.slots.in_flight }} in research · {{ o.slots.open }} open</div></div>
+  <div class="card stat"><div class="label">Budget</div>{{ budget_bars(o.budget) }}
+    <div class="sub">next researcher ≈ ${{ "%.2f" | format(o.budget.estimate) }}</div></div>
+  <div class="card"><div class="stat"><div class="label">Controls</div></div>
+    <div class="actions" style="margin-top:8px">
+      {% if o.paused %}
+      <form method="post" action="/actions/agents/resume" class="inline">{{ csrf_field() }}<button type="submit">Resume agents</button></form>
+      {% else %}
+      <form method="post" action="/actions/agents/pause" class="inline" data-confirm="Pause the agents? A running job finishes; no new jobs start.">{{ csrf_field() }}<button type="submit">Pause agents</button></form>
+      {% endif %}
+    </div>
+    <form method="post" action="/actions/agents/queue" class="actions" style="margin-top:10px">{{ csrf_field() }}
+      <select name="interval">{% for iv in intervals %}<option>{{ iv }}</option>{% endfor %}</select>
+      <input name="note" placeholder="Idea or instructions (optional)" maxlength="2000">
+      <button type="submit">Queue research</button>
+    </form>
+  </div>
+</div>
+
+<h2>Jobs</h2>
+<div class="card table-wrap"><table>
+<tr><th>#</th><th>Role</th><th>Status</th><th>Target</th><th>Started</th><th class="num">Time</th><th class="num">Cost</th><th class="num">Tokens</th><th>Error</th><th></th></tr>
+{% for j in o.jobs %}
+<tr><td><a href="/agents/jobs/{{ j.id }}">{{ j.id }}</a></td><td>{{ j.agent }}</td><td>{{ chip(j.status) }}</td>
+  <td class="small">{{ j.target.interval or j.target.slug or j.target.date or ("submission " ~ j.target.submission_id if j.target.submission_id) or "" }}</td>
+  <td class="small">{{ j.started_at | when }}</td>
+  <td class="num small">{% if j.duration_sec is not none %}{{ (j.duration_sec // 60) }}m{{ "%02d" | format(j.duration_sec % 60) }}s{% endif %}</td>
+  <td class="num">${{ "%.3f" | format(j.cost_usd) }}</td><td class="num small">{{ "{:,}".format(j.tokens) if j.tokens else "" }}</td>
+  <td class="small neg">{{ (j.error or "") | truncate(90) }}</td>
+  <td>{% if j.status == "queued" %}<form method="post" action="/actions/agents/jobs/{{ j.id }}/cancel" class="inline" data-confirm="Cancel job {{ j.id }}?">{{ csrf_field() }}<button type="submit">Cancel</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="10" class="muted">No jobs yet.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Submissions</h2>
+<div class="card table-wrap"><table>
+<tr><th>#</th><th>Strategy</th><th>Status</th><th class="num">WF Sharpe</th><th class="num">Holdout Sharpe</th><th class="num">Trials</th><th>Notes</th></tr>
+{% for x in o.submissions %}
+<tr><td><a href="/agents/submissions/{{ x.id }}">{{ x.id }}</a></td>
+  <td>{{ x.name }}@{{ x.version }} <span class="muted small">{{ x.interval }}{{ " · challenger" if x.challenger }}</span></td>
+  <td>{{ chip(x.status) }}</td><td class="num">{{ x.gate.sharpe | fnum }}</td><td class="num">{{ x.holdout.sharpe | fnum }}</td>
+  <td class="num">{{ x.n_trials }}</td>
+  <td class="small">{{ ((x.audit.findings if x.audit else "") or (x.reasons | join("; "))) | truncate(140) }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No submissions yet.</td></tr>{% endfor %}
+</table></div>
+
+{% if o.notes %}<h2>Agent notes</h2>
+{% for n in o.notes %}<details class="card small" style="margin-bottom:8px"><summary><strong>{{ n.topic }}</strong> · job {{ n.job_id }} · {{ n.ts | when }}</summary><p>{{ n.body }}</p></details>{% endfor %}
+{% endif %}
+{% endblock %}

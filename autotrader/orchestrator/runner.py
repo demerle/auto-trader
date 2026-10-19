@@ -37,7 +37,7 @@ def permissions(role: str) -> list[dict]:
              rule("read", "deny", "*.env"), rule("read", "deny", "*.env.*")]
     if role != "researcher":
         rules += [rule("webfetch", "deny"), rule("websearch", "deny")]
-    if role == "auditor":
+    if role in ("auditor", "supervisor"):
         rules += [rule("edit", "deny"), rule("write", "deny"), rule("patch", "deny")]
     return rules
 

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Log{% endblock %}
+{% block content %}
+<h1>Log</h1>
+<div class="cols">
+<div>
+<h2>Dashboard actions</h2>
+<div class="card table-wrap"><table>
+<tr><th>When</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+{% for a in rows %}<tr><td class="small">{{ a.ts | when }}</td><td>{{ a.action }}</td><td>{{ a.target }}</td><td class="small"><code>{{ a.detail | tojson }}</code></td></tr>
+{% else %}<tr><td colspan="4" class="muted">No actions yet.</td></tr>{% endfor %}
+</table></div>
+</div>
+<div>
+<h2>Alerts</h2>
+<div class="card">
+{% for a in alerts %}<div class="small" style="margin-bottom:8px"><span class="muted">{{ a.ts | when }}</span> <strong>{{ a.title }}</strong><div>{{ a.message }}</div></div>
+{% else %}<span class="muted">No alerts.</span>{% endfor %}
+</div>
+</div>
+</div>
+{% endblock %}

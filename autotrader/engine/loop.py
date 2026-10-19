@@ -40,6 +40,7 @@ def active_intervals(arena: Arena) -> set[str]:
 def run_forever(arena: Arena, poll_sec: float = 10.0, reconcile_every_sec: float = 600.0) -> None:
     from autotrader.evaluator.jobs import run_daily
     from autotrader.evaluator.policy import load_policy
+    from autotrader.reports.daily import publish_daily_report
 
     settings = get_settings()
     delay = pd.Timedelta(seconds=settings.engine_data_delay_sec)
@@ -71,6 +72,10 @@ def run_forever(arena: Arena, poll_sec: float = 10.0, reconcile_every_sec: float
                 with arena.sessions() as session:
                     set_state(session, LAST_EVAL, {"date": day})
                     session.commit()
+                try:  # the report includes today's verdicts, so it follows the evaluation
+                    publish_daily_report(arena.sessions, arena.archive, day, now=now)
+                except Exception:  # noqa: BLE001
+                    log.exception("daily report failed")
             if time.monotonic() - last_reconcile > reconcile_every_sec:
                 with arena.sessions() as session:
                     drift = reconcile(session, arena.broker)

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_macros.html" import chip with context %}
+{% block title %}Job {{ job.id }}{% endblock %}
+{% block content %}
+<h1>Job {{ job.id }}: {{ job.agent }} {{ chip(job.status) }}</h1>
+<p class="muted">{{ job.model or "model not set yet" }} · attempt {{ job.attempts }} · started {{ job.started_at | when }}
+  · ${{ "%.4f" | format(job.cost_usd) }} · {{ "{:,}".format(job.tokens) }} tokens</p>
+{% if job.error %}<div class="banner warn">{{ job.error }}</div>{% endif %}
+{% for x in subs %}<p>Submitted <a href="/agents/submissions/{{ x.id }}">{{ x.name }}@{{ x.version }}</a> {{ chip(x.status) }}</p>{% endfor %}
+<details class="card"><summary>Prompt</summary><pre>{{ prompt }}</pre></details>
+
+<h2>Tool calls ({{ calls | length }})</h2>
+<div class="card table-wrap"><table>
+<tr><th>Time</th><th>Tool</th><th></th><th class="num">ms</th><th class="num">Trials</th><th>Args</th></tr>
+{% for c in calls %}<tr><td class="small">{{ c.ts | when }}</td><td>{{ c.tool }}</td><td>{{ "ok" if c.ok else "error" }}</td>
+  <td class="num small">{{ c.ms }}</td><td class="num small">{{ c.trials or "" }}</td>
+  <td class="small"><code>{{ (c.args | tojson) | truncate(160) }}</code></td></tr>
+{% else %}<tr><td class="muted">No tool calls.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Transcript</h2>
+{% for e in entries %}
+<div class="entry {{ e.kind }}"><div class="who">{{ e.title }}</div>
+  {% if e.kind == "text" %}{{ e.body | markdown }}{% else %}<pre>{{ e.body }}</pre>{% endif %}</div>
+{% else %}<div class="card muted">No transcript.</div>{% endfor %}
+{% endblock %}

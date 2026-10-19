@@ -40,3 +40,15 @@ def history() -> dict[str, pd.DataFrame]:
         df.index = days
         out[s] = df
     return out
+
+
+@pytest.fixture(autouse=True)
+def sent_alerts(monkeypatch) -> list[tuple[str, str]]:
+    """Tests never store alerts in the real database or push them to Discord/ntfy."""
+    from autotrader import alerts
+
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(alerts, "_record", lambda title, message, priority: None)
+    monkeypatch.setattr(alerts, "_deliver", lambda title, message, priority: sent.append((title, message)))
+    monkeypatch.setattr(alerts, "post_discord", lambda url, payload, tries=3: sent.append(("discord", payload)))
+    return sent

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import chip with context %}
+{% block title %}Submission {{ sub.id }}{% endblock %}
+{% block content %}
+<h1>{{ sub.name }}@{{ sub.version }} {{ chip(sub.status) }}</h1>
+<p class="muted">{{ sub.interval }} · from <a href="/agents/jobs/{{ sub.job_id }}">job {{ sub.job_id }}</a> · {{ sub.created_at | when }}
+  {% if sub.bot_id %}· <a href="/league">deployed</a>{% endif %}{{ " · challenger" if sub.challenger }}</p>
+
+<div class="cols">
+<div>
+  <h2>Rationale</h2><div class="card">{{ sub.rationale }}</div>
+  {% if sub.reasons %}<h2>Gate</h2><div class="card"><ul>{% for r in sub.reasons %}<li>{{ r }}</li>{% endfor %}</ul></div>{% endif %}
+  {% if sub.audit %}<h2>Audit: {{ "approved" if sub.audit.approve else "rejected" }}</h2><pre>{{ sub.audit.findings }}</pre>{% endif %}
+</div>
+<div>
+  <h2>Results</h2>
+  <div class="card table-wrap"><table>
+    <tr><th></th><th class="num">Walk-forward</th><th class="num">Holdout</th></tr>
+    {% for k in ["sharpe","total_return","max_drawdown","psr","dsr","closing_trades","benchmark_sharpe"] %}
+    <tr><td>{{ k | replace("_", " ") }}</td><td class="num">{{ sub.gate.get(k) | fnum(3) }}</td><td class="num">{{ sub.holdout.get(k) | fnum(3) }}</td></tr>
+    {% endfor %}
+    <tr><td>trials counted</td><td class="num">{{ sub.n_trials }}</td><td></td></tr>
+  </table></div>
+</div>
+</div>
+<h2>Code</h2><pre>{{ source }}</pre>
+{% endblock %}

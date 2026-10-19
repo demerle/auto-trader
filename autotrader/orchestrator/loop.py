@@ -13,12 +13,13 @@ from autotrader.engine.state import get_state, set_state
 from autotrader.evaluator.policy import Policy
 from autotrader.orchestrator import budget, pipeline, slots
 from autotrader.orchestrator.config import AgentsConfig, load_agents_config
+from autotrader.orchestrator.control import PAUSED  # noqa: F401 - re-exported
 from autotrader.orchestrator.runner import run_job, run_opencode
 
 log = logging.getLogger(__name__)
-PRIORITY = case({"auditor": 0, "researcher": 1, "reviewer": 2}, value=AgentJob.agent, else_=3)
+PRIORITY = case({"auditor": 0, "researcher": 1, "supervisor": 2, "reviewer": 3},
+                value=AgentJob.agent, else_=4)
 BUDGET_ALERT = "budget_alert"
-PAUSED = "agents_paused"  # set on provider auth errors; cleared by `autotrader agents resume`
 
 
 _HISTORY: dict[tuple[str, str], int] = {}
@@ -60,6 +61,8 @@ def tick(sessions: sessionmaker[Session], archive, cfg: AgentsConfig, policy: Po
             lines.append(f"queued researcher job for a {j.target['interval']} slot")
         for j in pipeline.schedule_reviews(s, policy, cfg, now):
             lines.append(f"queued weekly review of {j.target['slug']}")
+        for j in pipeline.schedule_commentary(s, cfg, now):
+            lines.append(f"queued supervisor commentary for {j.target['date']}")
         job = next_job(s)
         if job is None:
             (s.rollback if dry_run else s.commit)()

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Graveyard{% endblock %}
+{% block content %}
+<h1>Graveyard</h1>
+<p class="muted small">Eradicated bots and their autopsies. Researchers read these so ideas are not repeated.</p>
+{% for r in rows %}
+<div class="card" style="margin-bottom:10px">
+  <strong><a href="/bots/{{ r.slug }}">{{ r.slug }}</a></strong> <span class="muted">{{ r.strategy }} · {{ r.interval }} · died {{ r.died | when }}</span>
+  <p class="small">{{ r.autopsy }}</p>
+</div>
+{% else %}<div class="card muted">Nobody has died yet.</div>{% endfor %}
+{% endblock %}

@@ -15,12 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from autotrader.alerts import alert
-from autotrader.db.models import AgentJob, Bot, BotStage, Evaluation, Submission
+from autotrader.db.models import AgentJob, Bot, BotStage, Evaluation, Report, Submission
 from autotrader.engine.roster import ensure_strategy_version
 from autotrader.evaluator.policy import Policy
 from autotrader.evaluator.run import clean_json
 from autotrader.orchestrator.config import AgentsConfig
 from autotrader.orchestrator.slots import active_bots, research_prompt
+from autotrader.reports.daily import post_commentary
 from autotrader.strategies import registry
 from autotrader.strategies.lint import lint_source
 
@@ -111,7 +112,8 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
         if (job.result or {}).get("settled"):
             continue
         has_sub = session.scalars(select(Submission).where(Submission.job_id == job.id)).first()
-        verdict = job.agent == "auditor" and session.get(Submission, job.submission_id).audit
+        verdict = (job.agent == "auditor" and session.get(Submission, job.submission_id).audit
+                   or job.agent == "supervisor" and bool(_commentary(session, job)))
         if not has_sub and not verdict and job.attempts < cfg.max_attempts:
             job.status = "queued"  # retry (on the fallback model)
             notes.append(f"job {job.id} ({job.agent}) failed; retrying")
@@ -122,6 +124,7 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
                 notes.append(f"job {job.id} ({job.agent}) failed for good")
 
     queue_audits(session)
+    notes += post_commentary(session)
 
     for sub in session.scalars(select(Submission).where(Submission.status == "audit_pending")):
         audit = sub.audit or {}
@@ -197,3 +200,37 @@ def schedule_reviews(session: Session, policy: Policy, cfg: AgentsConfig, now: p
     return out
 
 
+def _commentary(session: Session, job: AgentJob) -> str:
+    rep = session.scalars(select(Report).where(Report.date == (job.target or {}).get("date"))).first()
+    return rep.commentary if rep else ""
+
+
+COMMENTARY_WINDOW = pd.Timedelta(hours=12)  # stale commentary is not worth paying for
+
+
+def schedule_commentary(session: Session, cfg: AgentsConfig, now: pd.Timestamp) -> list[AgentJob]:
+    """One supervisor job per fresh daily report; queued ones that went stale are dropped."""
+    cutoff = (now - COMMENTARY_WINDOW).to_pydatetime()
+    for job in session.scalars(select(AgentJob).where(AgentJob.agent == "supervisor",
+                                                      AgentJob.status == "queued",
+                                                      AgentJob.created_at < cutoff)):
+        job.status = "cancelled"
+        job.result = {"error": "report too old for commentary"}
+    if not cfg.daily_commentary:
+        return []
+    rep = session.scalars(select(Report).order_by(Report.date.desc()).limit(1)).first()
+    if rep is None or rep.commentary or _utc(rep.created_at) < now - COMMENTARY_WINDOW:
+        return []
+    for job in session.scalars(select(AgentJob).where(AgentJob.agent == "supervisor")):
+        if (job.target or {}).get("date") == rep.date:
+            return []
+    job = AgentJob(agent="supervisor", model="", status="queued", target={"date": rep.date},
+                   prompt=f"Write your commentary on the daily report for {rep.date}.")
+    session.add(job)
+    session.flush()
+    return [job]
+
+
+def _utc(t) -> pd.Timestamp:
+    ts = pd.Timestamp(t)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")

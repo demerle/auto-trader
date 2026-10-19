@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field, chip with context %}
+{% block title %}{{ bot.slug }}{% endblock %}
+{% block content %}
+<h1>{{ bot.slug }} {{ chip(bot.stage) }} {% if bot.paused_until %}<span class="chip">paused until {{ bot.paused_until | when }}</span>{% endif %}</h1>
+<p class="muted">{{ bot.strategy }} · {{ bot.interval }} · {{ bot.account }} account ·
+  by {% if bot.submission_id %}<a href="/agents/submissions/{{ bot.submission_id }}">{{ bot.author }}</a>{% else %}{{ bot.author }}{% endif %}
+  · since {{ bot.stage_since | when }}</p>
+{% if bot.description %}<p>{{ bot.description }}</p>{% endif %}
+
+<div class="grid">
+  <div class="card stat"><div class="label">Equity</div><div class="value">{{ bot.equity | money }}</div>
+    <div class="sub">cash {{ bot.cash | money }} · capital {{ bot.capital | money }}</div></div>
+  <div class="card stat"><div class="label">Return</div>
+    <div class="value {{ bot.metrics.total_return | sign }}">{{ bot.metrics.total_return | pct }}</div>
+    <div class="sub">vs SPY {{ bot.metrics.excess_return | pct }}</div></div>
+  <div class="card stat"><div class="label">Sharpe / PSR</div>
+    <div class="value">{{ bot.metrics.sharpe | fnum }}</div><div class="sub">PSR {{ bot.metrics.psr | fnum }} · backtest Sharpe {{ bot.backtest.sharpe | fnum }}</div></div>
+  <div class="card stat"><div class="label">Record</div><div class="value">{{ bot.days }}d</div>
+    <div class="sub">{{ bot.trades }} closed trades · max DD {{ bot.metrics.max_drawdown | pct(false) }}</div></div>
+</div>
+
+<h2>Equity</h2>
+<div class="card">{{ line_chart([(bot.slug, bot.equity_series), ("SPY (same capital)", bot.spy_series)]) }}</div>
+
+<div class="cols">
+  <div>
+    <h2>Evaluations</h2>
+    <div class="card table-wrap"><table>
+      {% for e in bot.evaluations %}<tr><td class="small muted">{{ e.ts | when }}</td><td>{{ chip(e.decision) }}</td><td class="small">{{ e.rationale }}</td></tr>
+      {% else %}<tr><td class="muted">Not evaluated yet.</td></tr>{% endfor %}
+    </table></div>
+    <h2>Fills</h2>
+    <div class="card table-wrap"><table>
+      <tr><th>When</th><th>Symbol</th><th class="num">Qty</th><th class="num">Price</th><th></th></tr>
+      {% for f in bot.fills %}<tr><td class="small">{{ f.ts | when }}</td><td>{{ f.symbol }}</td>
+        <td class="num {{ f.qty | sign }}">{{ f.qty | fnum(0) }}</td><td class="num">{{ f.price | fnum }}</td>
+        <td class="small muted">{{ "crossed" if f.internal }}</td></tr>
+      {% else %}<tr><td class="muted">No fills yet.</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  <div>
+    <h2>Controls</h2>
+    <div class="card actions">
+      {% if bot.paused_until %}
+      <form method="post" action="/actions/bots/{{ bot.slug }}/unpause" class="inline">{{ csrf_field() }}<button type="submit">Unpause</button></form>
+      {% else %}
+      <form method="post" action="/actions/bots/{{ bot.slug }}/pause" class="inline" data-confirm="Pause {{ bot.slug }}? It keeps its positions but opens no new risk.">{{ csrf_field() }}<button type="submit">Pause</button></form>
+      {% endif %}
+      {% if bot.stage == "paper_proven" %}<button disabled title="Live trading arrives in phase 7">Promote to live (phase 7)</button>{% endif %}
+    </div>
+    <h2>Positions</h2>
+    <div class="card">{% for s, q in bot.positions.items() %}<div>{{ s }} <span class="{{ q | sign }}">{{ q | fnum(0) }}</span></div>{% else %}<span class="muted">Flat.</span>{% endfor %}</div>
+    <h2>Params</h2>
+    <pre>{{ bot.params | tojson(indent=1) }}</pre>
+    {% if bot.cash_flows %}<h2>Capital moves</h2><div class="card small">
+      {% for c in bot.cash_flows %}<div>{{ c.ts | when }} <span class="{{ c.amount | sign }}">{{ c.amount | money(true) }}</span> <span class="muted">{{ c.reason }}</span></div>{% endfor %}</div>{% endif %}
+  </div>
+</div>
+
+{% if bot.notes %}<h2>Notes</h2><pre>{{ bot.notes }}</pre>{% endif %}
+{% if bot.agent_notes %}<h2>Agent notes</h2>
+  {% for n in bot.agent_notes %}<div class="card small" style="margin-bottom:8px"><strong>{{ n.topic }}</strong> <span class="muted">{{ n.ts | when }}</span><div>{{ n.body }}</div></div>{% endfor %}
+{% endif %}
+<h2>Code <span class="muted small">sha {{ bot.code_sha[:12] }}</span></h2>
+<pre>{{ bot.source }}</pre>
+{% endblock %}

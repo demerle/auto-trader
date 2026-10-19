@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from autotrader.config.universes import UNIVERSES, resolve
 from autotrader.data.intervals import PERIODS_PER_YEAR
 from autotrader.db.models import (
-    AgentJob, AgentNote, Bot, BotStage, Evaluation, StrategyVersion, Submission, ToolCall,
+    AgentJob, AgentNote, Bot, BotStage, Evaluation, Report, StrategyVersion, Submission, ToolCall,
 )
 from autotrader.evaluator.gate import split_holdout, universe_benchmark
 from autotrader.evaluator.policy import Policy
@@ -46,7 +46,9 @@ ROLE_TOOLS = {
                  "propose_version", "write_note"),
     "auditor": ("get_strategy_api", "list_bots", "get_bot_stats", "get_submission",
                 "audit_verdict", "write_note"),
+    "supervisor": ("get_report", "list_bots", "get_bot_stats", "get_graveyard", "write_commentary"),
 }
+COMMENTARY_MAX = 1500
 
 
 class ToolFailure(Exception):
@@ -475,6 +477,37 @@ exits happen on bar closes. Gross exposure is capped at 1.0 of the bot's equity.
             sub.audit = {"approve": bool(approve), "findings": findings[:6000], "job_id": self.job_id}
             s.commit()
         return f"recorded: {'APPROVE' if approve else 'REJECT'} submission {submission_id}"
+
+    # ----- supervisor -----
+    def _report(self, s: Session) -> Report:
+        day = (self._job(s).target or {}).get("date")
+        rep = s.scalars(select(Report).where(Report.date == day)).first() if day else None
+        if rep is None:
+            raise ToolFailure(f"no report for {day}")
+        return rep
+
+    def get_report(self) -> str:
+        """Today's daily report (the markdown sent to the human) and its underlying data."""
+        with self.sessions() as s:
+            rep = self._report(s)
+            return (f"# Report {rep.date}\n\n{rep.body_md}\n\n## Data\n```json\n"
+                    f"{json.dumps(rep.data, indent=1, default=str)[:20000]}\n```")
+
+    def write_commentary(self, text: str) -> str:
+        """Your commentary on today's report (plain text or simple markdown, at most 1500 chars).
+        Call exactly once."""
+        text = text.strip()
+        if not text:
+            raise ToolFailure("commentary is empty")
+        if len(text) > COMMENTARY_MAX:
+            raise ToolFailure(f"commentary is {len(text)} chars; the limit is {COMMENTARY_MAX}")
+        with self.sessions() as s:
+            rep = self._report(s)
+            if rep.commentary:
+                raise ToolFailure("commentary for this report was already written")
+            rep.commentary = text
+            s.commit()
+        return "commentary saved; it will be posted to the human"
 
     # ----- notes -----
     def write_note(self, topic: str, body: str) -> str:

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
+<title>{% block title %}Arena{% endblock %} · Autotrader</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+{% if nav != "login" %}
+<header class="top">
+  <span class="brand">Autotrader</span>
+  <nav>
+    {% for key, label, href in [("overview","Overview","/"),("league","League","/league"),("agents","Agents","/agents"),("reports","Reports","/reports"),("graveyard","Graveyard","/graveyard"),("audit","Log","/audit")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key == 'agents' and nav in ('job','submission')) or (key == 'reports' and nav == 'report') or (key == 'league' and nav == 'bot') }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="/logout" class="inline"><button type="submit">Log out</button></form>
+</header>
+{% endif %}
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

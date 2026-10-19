@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     evaluate_et: str = "16:30"  # daily evaluation (and Friday allocation) after the close
 
     ntfy_url: str | None = None  # e.g. https://ntfy.sh/<your-private-topic>
-    discord_webhook: str | None = None  # Alpaca accepts OPG orders from 19:00 ET
+    discord_webhook: str | None = None  # https://discord.com/api/webhooks/<id>/<token>
+
+    # Dashboard (phase 6). It refuses to serve pages without a token.
+    dashboard_token: str | None = None
+    dashboard_url: str = "http://127.0.0.1:8005"  # for links in Discord posts
+    dashboard_secure_cookie: bool = False  # set true when served over HTTPS
 
     # Agents (phase 5)
     agent_database_url: str | None = None  # least-privilege role for agent tools; else database_url

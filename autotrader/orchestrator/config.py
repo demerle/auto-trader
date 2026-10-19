@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
 DEFAULT_PATH = Path(__file__).parent.parent / "config" / "agents.yaml"
-ROLES = ("researcher", "auditor", "reviewer")
+ROLES = ("researcher", "auditor", "reviewer", "supervisor")
 
 
 class Windows(BaseModel):
@@ -23,7 +23,8 @@ class Budget(BaseModel):
     go_caps: Windows = Windows(five_hours=12.0, week=30.0, month=60.0)
     go_guard: float = 0.9
     alert_at: float = 0.8
-    seed_estimates: dict[str, float] = {"researcher": 1.5, "auditor": 0.4, "reviewer": 0.1}
+    seed_estimates: dict[str, float] = {"researcher": 1.5, "auditor": 0.4, "reviewer": 0.1,
+                                        "supervisor": 0.02}
 
     @property
     def limits(self) -> dict[str, float]:
@@ -45,7 +46,7 @@ class AgentsConfig(BaseModel):
 
     model: str  # the only model any agent call may use
     budget: Budget = Budget()
-    timeouts_min: dict[str, float] = {"researcher": 45, "auditor": 15, "reviewer": 10}
+    timeouts_min: dict[str, float] = {"researcher": 45, "auditor": 15, "reviewer": 10, "supervisor": 5}
     max_attempts: int = 2
     concurrency: int = 1
     per_job: PerJob = PerJob()
@@ -56,6 +57,7 @@ class AgentsConfig(BaseModel):
     holdout_days: dict[str, int] = {"1d": 365}
     review: Review = Review()
     auto_commit: bool = True
+    daily_commentary: bool = True  # supervisor agent comments on each daily report
     sandbox_memory_mb: int = 3072
 
     @field_validator("model")
