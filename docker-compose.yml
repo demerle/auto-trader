@@ -86,6 +86,7 @@ services:
       - ./workspace:/app/workspace
       - ./autotrader/strategies/generated:/app/autotrader/strategies/generated
       - ./secrets/opencode-go.json:/run/secrets/opencode-auth.json:ro
+      - ./autotrader/config/agents.yaml:/app/autotrader/config/agents.yaml:ro  # the model setting
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID]
     security_opt: ["no-new-privileges:true"]

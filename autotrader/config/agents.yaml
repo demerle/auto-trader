@@ -1,13 +1,10 @@
 # Strategy-research agents (opencode on OpenCode Go). Human-owned: agents cannot edit this.
 
-models:                        # opencode -m values; `opencode models` lists what Go offers
-  researcher: opencode-go/glm-5.3
-  auditor: opencode-go/deepseek-v4-pro   # a different model family from the researcher
-  reviewer: opencode-go/deepseek-v4.1-flash
-fallback_models:               # used when a job failed once on its primary model
-  researcher: opencode-go/kimi-k3
-  auditor: opencode-go/qwen3.8-max
-  reviewer: opencode-go/qwen3.8-flash
+# The ONE model every agent call uses (researcher, auditor, reviewer, and opencode's own
+# background calls such as titles). Nothing else is ever used: there are no per-role models
+# and no fallbacks. To switch, change this line (`opencode models` lists the options);
+# the orchestrator picks it up on its next job, no rebuild needed.
+model: opencode-go/glm-5.3-flash
 
 budget:                        # the arena's own spend, USD (half of the Go plan caps)
   five_hours: 6.0

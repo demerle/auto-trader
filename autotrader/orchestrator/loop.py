@@ -12,7 +12,7 @@ from autotrader.db.models import AgentJob
 from autotrader.engine.state import get_state, set_state
 from autotrader.evaluator.policy import Policy
 from autotrader.orchestrator import budget, pipeline, slots
-from autotrader.orchestrator.config import AgentsConfig
+from autotrader.orchestrator.config import AgentsConfig, load_agents_config
 from autotrader.orchestrator.runner import run_job, run_opencode
 
 log = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ def _budget_alert(session: Session, chk: budget.BudgetCheck, cfg: AgentsConfig, 
 
 
 def run_forever(sessions, archive, cfg: AgentsConfig, policy: Policy, poll_sec: float = 60.0) -> None:
-    log.info("orchestrator started: models %s", cfg.models)
+    log.info("orchestrator started: model %s", cfg.model)
     with sessions() as s:  # jobs cut off by a restart count as failed attempts
         for job in s.scalars(select(AgentJob).where(AgentJob.status == "running")):
             job.status = "failed"
@@ -109,6 +109,7 @@ def run_forever(sessions, archive, cfg: AgentsConfig, policy: Policy, poll_sec: 
         s.commit()
     while True:
         try:
+            cfg = load_agents_config()  # re-read: a model change applies to the next job
             for line in tick(sessions, archive, cfg, policy):
                 log.info(line)
         except Exception:  # noqa: BLE001 - keep the loop alive

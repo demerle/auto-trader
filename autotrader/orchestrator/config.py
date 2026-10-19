@@ -1,11 +1,10 @@
 """Agent settings (config/agents.yaml): models, budget, caps, data windows."""
 
-from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 
 DEFAULT_PATH = Path(__file__).parent.parent / "config" / "agents.yaml"
 ROLES = ("researcher", "auditor", "reviewer")
@@ -42,8 +41,9 @@ class Review(BaseModel):
 
 
 class AgentsConfig(BaseModel):
-    models: dict[str, str]
-    fallback_models: dict[str, str] = {}
+    model_config = ConfigDict(extra="forbid")  # a stray `models:` key must not be ignored
+
+    model: str  # the only model any agent call may use
     budget: Budget = Budget()
     timeouts_min: dict[str, float] = {"researcher": 45, "auditor": 15, "reviewer": 10}
     max_attempts: int = 2
@@ -58,10 +58,16 @@ class AgentsConfig(BaseModel):
     auto_commit: bool = True
     sandbox_memory_mb: int = 3072
 
+    @field_validator("model")
+    @classmethod
+    def _provider_model(cls, v: str) -> str:
+        if "/" not in v or v.strip() != v:
+            raise ValueError("model must look like provider/model, e.g. opencode-go/glm-5.3-flash")
+        return v
+
     def model_for(self, role: str, attempt: int = 1) -> str:
-        if attempt > 1 and role in self.fallback_models:
-            return self.fallback_models[role]
-        return self.models[role]
+        """Every role and every attempt uses the same configured model."""
+        return self.model
 
     def holdout_start(self, interval: str, now: pd.Timestamp | None = None) -> pd.Timestamp:
         """Bars at or after this are sealed from agents (start of a UTC day, so stable intraday)."""
@@ -73,6 +79,6 @@ class AgentsConfig(BaseModel):
         return now.normalize() - pd.Timedelta(days=int(365 * self.history_years.get(interval, 2)))
 
 
-@lru_cache
 def load_agents_config(path: Path = DEFAULT_PATH) -> AgentsConfig:
+    """Read fresh each time, so editing agents.yaml (e.g. the model) applies to the next job."""
     return AgentsConfig.model_validate(yaml.safe_load(path.read_text()))

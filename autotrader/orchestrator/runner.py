@@ -45,6 +45,10 @@ def permissions(role: str) -> list[dict]:
 def opencode_config(role: str, model: str, mcp_url: str, steps: int = 120) -> dict:
     return {
         "$schema": "https://opencode.ai/config.json",
+        # Pin everything to the one configured model: the main model and the "small" model
+        # opencode uses for background calls (titles, summaries, compaction).
+        "model": model,
+        "small_model": model,
         "permissions": permissions(role),
         "agents": {role: {"model": model, "mode": "primary", "steps": steps,
                           "description": f"autotrader {role}",
@@ -136,6 +140,27 @@ def parse_events(lines) -> RunResult:
     return RunResult(None, False, sum(c for c, _ in entries), tokens, session_id, error, error_type)
 
 
+def session_cost(session_id: str, home: Path, xdg_config: Path) -> tuple[float, dict] | None:
+    """Total cost and tokens of an opencode session, from `opencode session export`."""
+    s = get_settings()
+    try:
+        out = subprocess.run(_priv_drop(s.agent_user) + [s.opencode_bin, "session", "export",
+                                                         "--standalone", session_id],
+                             env=_env(home, xdg_config), cwd=xdg_config.parent, capture_output=True,
+                             text=True, timeout=120, check=True).stdout
+        info = json.loads(out).get("info", {})
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        log.warning("could not read cost of session %s: %s", session_id, exc)
+        return None
+    tokens: dict[str, float] = {}
+    for k, v in (info.get("tokens") or {}).items():
+        if isinstance(v, dict):
+            tokens |= {f"{k}_{k2}": v2 for k2, v2 in v.items() if isinstance(v2, (int, float))}
+        elif isinstance(v, (int, float)):
+            tokens[k] = v
+    return float(info.get("cost") or 0.0), tokens
+
+
 def _env(home: Path, xdg_config: Path) -> dict[str, str]:
     """No database URL, no broker keys: only what opencode needs."""
     env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(home),
@@ -184,6 +209,10 @@ def run_opencode(job: AgentJob, model: str, workspace: Path, mcp_url: str, timeo
                 proc.wait()
     res = parse_events(log_path.read_text(errors="replace").splitlines())
     res.exit_code, res.timed_out = proc.returncode, timed_out
+    if res.session_id:  # `run --format json` carries no cost; the session export does
+        cost = session_cost(res.session_id, home, xdg)
+        if cost is not None:
+            res.cost_usd, res.tokens = cost
     log.info("job %s (%s, %s) finished in %.0fs: exit %s, $%.4f", job.id, job.agent, model,
              time.monotonic() - started, proc.returncode, res.cost_usd)
     return res

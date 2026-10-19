@@ -136,13 +136,13 @@ def test_rejected_audit_requeues_research_with_findings(arena):
         assert s.scalars(select(Bot)).first() is None
 
 
-def test_failed_job_retries_on_fallback_model(arena):
+def test_failed_job_retries_on_the_same_model(arena):
     sessions, archive, cfg, *_ = arena
     run_ticks(arena, fake_opencode(fail_first_researcher=True), 2)
     with sessions() as s:
         r = s.scalars(select(AgentJob).where(AgentJob.agent == "researcher")).first()
         assert r.attempts == 2 and r.status == "succeeded"
-        assert r.model == cfg.fallback_models["researcher"]
+        assert r.model == cfg.model
 
 
 def test_budget_blocks_jobs(arena):
@@ -208,3 +208,25 @@ def test_auth_error_pauses_without_burning_attempts(arena):
     with sessions() as s:
         job = s.scalars(select(AgentJob)).one()
         assert job.status == "queued" and job.attempts == 0
+
+
+def test_only_the_configured_model_is_ever_used(arena):
+    sessions, archive, cfg, *_ = arena
+    assert cfg.model == "opencode-go/glm-5.3-flash"
+    assert {cfg.model_for(r, a) for r in ("researcher", "auditor", "reviewer") for a in (1, 2, 3)} \
+        == {cfg.model}
+    oc = opencode_config("researcher", cfg.model, "http://127.0.0.1:1/t/mcp")
+    assert oc["model"] == oc["small_model"] == oc["agents"]["researcher"]["model"] == cfg.model
+    run_ticks(arena, fake_opencode(), 3)
+    with sessions() as s:
+        assert {j.model for j in s.scalars(select(AgentJob))} == {cfg.model}
+
+
+def test_unknown_model_keys_are_rejected():
+    from pydantic import ValidationError
+
+    from autotrader.orchestrator.config import AgentsConfig
+
+    with pytest.raises(ValidationError):
+        AgentsConfig.model_validate({"model": "opencode-go/glm-5.3-flash",
+                                     "models": {"researcher": "opencode-go/kimi-k3"}})
