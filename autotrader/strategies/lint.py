@@ -8,8 +8,9 @@ import ast
 
 ALLOWED_IMPORTS = {
     "math", "statistics", "dataclasses", "typing", "collections", "itertools", "functools",
-    "numpy", "pandas", "pydantic",
+    "datetime", "numpy", "pandas", "pydantic",
     "autotrader.indicators", "autotrader.strategies.base", "autotrader.config.universes",
+    "autotrader.options.strategy", "autotrader.options.helpers",
 }
 FORBIDDEN_NAMES = {
     "eval", "exec", "compile", "open", "__import__", "globals", "locals", "vars",

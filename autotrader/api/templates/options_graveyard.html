@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Gauntlet graveyard{% endblock %}
+{% block content %}
+<h1>Gauntlet graveyard</h1>
+<p class="muted small">Culled bots. Their autopsies (trade logs, the week's market, what the winners did) are handed to the agents that research their replacements.</p>
+{% for r in rows %}
+<div class="card" style="margin-bottom:12px">
+  <strong><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></strong> <span class="muted small">{{ r.strategy }} · {{ "agent" if r.author.startswith("job-") else "seed" }} · culled {{ r.died }}{% if r.week %} (week of {{ r.week }}, {{ r.ret | pct }}){% endif %}</span>
+  <details><summary>Autopsy</summary><pre>{{ r.autopsy }}</pre></details>
+</div>
+{% else %}<p class="muted">Nobody has been culled yet.</p>{% endfor %}
+{% endblock %}

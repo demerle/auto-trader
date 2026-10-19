@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
 DEFAULT_PATH = Path(__file__).parent.parent / "config" / "agents.yaml"
-ROLES = ("researcher", "auditor", "reviewer", "supervisor")
+ROLES = ("researcher", "auditor", "reviewer", "supervisor", "options_researcher", "options_auditor")
 
 
 class Windows(BaseModel):
@@ -24,7 +24,8 @@ class Budget(BaseModel):
     go_guard: float = 0.9
     alert_at: float = 0.8
     seed_estimates: dict[str, float] = {"researcher": 1.5, "auditor": 0.4, "reviewer": 0.1,
-                                        "supervisor": 0.02}
+                                        "supervisor": 0.02, "options_researcher": 1.5,
+                                        "options_auditor": 0.4}
 
     @property
     def limits(self) -> dict[str, float]:
@@ -46,7 +47,8 @@ class AgentsConfig(BaseModel):
 
     model: str  # the only model any agent call may use
     budget: Budget = Budget()
-    timeouts_min: dict[str, float] = {"researcher": 45, "auditor": 15, "reviewer": 10, "supervisor": 5}
+    timeouts_min: dict[str, float] = {"researcher": 45, "auditor": 15, "reviewer": 10, "supervisor": 5,
+                                      "options_researcher": 45, "options_auditor": 15}
     max_attempts: int = 2
     concurrency: int = 1
     per_job: PerJob = PerJob()

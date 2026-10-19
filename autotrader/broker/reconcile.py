@@ -15,7 +15,7 @@ class Drift:
 
 def reconcile(session: Session, broker: Broker) -> list[Drift]:
     """Compare the sum of bot ledgers with the broker's actual positions."""
-    ours = ledger_positions(session)
+    ours = ledger_positions(session, broker.account)
     theirs = broker.positions()
     return [
         Drift(s, ours.get(s, 0.0), theirs.get(s, 0.0))

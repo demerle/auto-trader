@@ -35,9 +35,9 @@ def permissions(role: str) -> list[dict]:
              rule("task", "deny"), rule("skill", "deny"), rule("browser", "deny"),
              rule("question", "deny"),  # nobody is there to answer
              rule("read", "deny", "*.env"), rule("read", "deny", "*.env.*")]
-    if role != "researcher":
+    if role not in ("researcher", "options_researcher"):
         rules += [rule("webfetch", "deny"), rule("websearch", "deny")]
-    if role in ("auditor", "supervisor"):
+    if role in ("auditor", "supervisor", "options_auditor"):
         rules += [rule("edit", "deny"), rule("write", "deny"), rule("patch", "deny")]
     return rules
 
@@ -68,8 +68,11 @@ def build_prompt(job: AgentJob, workspace: Path) -> str:
     if job.agent == "researcher":
         head = (f"Target interval: {target.get('interval', '1d')}. "
                 f"Slot reason: {target.get('reason', 'open slot')}.\n")
-    elif job.agent == "auditor":
+    elif job.agent in ("auditor", "options_auditor"):
         head = f"Audit submission_id {job.submission_id}.\n"
+    elif job.agent == "options_researcher":
+        head = (f"Options gauntlet seat: {target.get('reason') or 'replace ' + str(target.get('replaces'))}. "
+                f"Week of {target.get('week', 'now')}.\n")
     else:
         head = f"Review bot `{target.get('slug')}`.\n"
     return f"{head}Your workspace (current directory): {workspace}\n\n{job.prompt}"

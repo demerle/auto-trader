@@ -6,7 +6,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from autotrader.db.models import AgentJob, Bot, BotStage, Submission
+from autotrader.db.models import ARENA, AgentJob, Bot, BotStage, Submission
 from autotrader.evaluator.policy import Policy
 from autotrader.orchestrator.config import AgentsConfig
 
@@ -15,7 +15,7 @@ IN_FLIGHT_JOB = ("queued", "running")
 
 
 def active_bots(session: Session) -> list[Bot]:
-    return list(session.scalars(select(Bot).where(Bot.stage.in_(OCCUPYING))).all())
+    return list(session.scalars(select(Bot).where(Bot.stage.in_(OCCUPYING), Bot.group == ARENA)).all())
 
 
 def in_flight(session: Session) -> int:

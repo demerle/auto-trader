@@ -33,7 +33,7 @@ def active_intervals(arena: Arena) -> set[str]:
     with arena.sessions() as session:
         rows = session.scalars(
             select(StrategyVersion.interval).join(Bot, Bot.strategy_id == StrategyVersion.id)
-            .where(Bot.stage.in_(ACTIVE_STAGES))).all()
+            .where(Bot.stage.in_(ACTIVE_STAGES), Bot.account == arena.broker.account)).all()
     return set(rows)
 
 

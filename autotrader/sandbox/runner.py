@@ -47,7 +47,7 @@ class SandboxProcess:
     """One worker serving one strategy file. Use as a context manager or call close()."""
 
     def __init__(self, path: str | Path, params: dict | None = None, memory_mb: int = DEFAULT_MEMORY_MB,
-                 cpu_sec: int | None = None, load_timeout: float = 60.0):
+                 cpu_sec: int | None = None, load_timeout: float = 60.0, load_op: str = "load"):
         self.path = str(Path(path).resolve())
         self._tmp = tempfile.TemporaryDirectory(prefix="sandbox-")
         self._stderr: deque[str] = deque(maxlen=60)
@@ -58,7 +58,7 @@ class SandboxProcess:
             preexec_fn=_limits(memory_mb, cpu_sec), close_fds=True,
         )
         threading.Thread(target=self._drain_stderr, daemon=True).start()
-        self.meta: dict = self.call("load", load_timeout, path=self.path, params=params or {})["meta"]
+        self.meta: dict = self.call(load_op, load_timeout, path=self.path, params=params or {})["meta"]
 
     def _drain_stderr(self) -> None:
         for line in iter(self._proc.stderr.readline, b""):
@@ -136,7 +136,8 @@ class SandboxProcess:
 
 
 def run_once(path: str | Path, op: str, timeout: float = 900.0, params: dict | None = None,
-             memory_mb: int = DEFAULT_MEMORY_MB, **kwargs) -> dict:
+             memory_mb: int = DEFAULT_MEMORY_MB, load_op: str = "load", **kwargs) -> dict:
     """Start a worker, run one op with a CPU limit, and tear it down."""
-    with SandboxProcess(path, params, memory_mb=memory_mb, cpu_sec=int(timeout) + 60) as sb:
+    with SandboxProcess(path, params, memory_mb=memory_mb, cpu_sec=int(timeout) + 60,
+                        load_op=load_op) as sb:
         return sb.call(op, timeout, params=params, **kwargs)

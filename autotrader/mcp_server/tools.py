@@ -24,10 +24,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from autotrader.config.universes import UNIVERSES, resolve
 from autotrader.data.intervals import PERIODS_PER_YEAR
 from autotrader.db.models import (
-    AgentJob, AgentNote, Bot, BotStage, Evaluation, Report, StrategyVersion, Submission, ToolCall,
+    ARENA, AgentJob, AgentNote, Bot, BotStage, Evaluation, Report, StrategyVersion, Submission, ToolCall,
 )
 from autotrader.evaluator.gate import split_holdout, universe_benchmark
 from autotrader.evaluator.policy import Policy
+from autotrader.mcp_server.options_tools import OptionsToolsMixin
 from autotrader.orchestrator.config import AgentsConfig
 from autotrader.sandbox import SandboxError, run_once, static_meta
 from autotrader.strategies import lint
@@ -47,6 +48,11 @@ ROLE_TOOLS = {
     "auditor": ("get_strategy_api", "list_bots", "get_bot_stats", "get_submission",
                 "audit_verdict", "write_note"),
     "supervisor": ("get_report", "list_bots", "get_bot_stats", "get_graveyard", "write_commentary"),
+    "options_researcher": ("get_options_api", "get_gauntlet", "get_survivors", "get_options_graveyard",
+                           "get_weekly_results", "get_chain", "fetch_underlying", "run_options_backtest",
+                           "submit_options_strategy", "write_note"),
+    "options_auditor": ("get_options_api", "get_gauntlet", "get_survivors", "get_submission",
+                        "audit_verdict", "write_note"),
 }
 COMMENTARY_MAX = 1500
 
@@ -66,7 +72,7 @@ def _summary(m: dict, keys=("total_return", "cagr", "sharpe", "sortino", "max_dr
     return {k: _r(m[k]) for k in keys if k in m}
 
 
-class AgentTools:
+class AgentTools(OptionsToolsMixin):
     def __init__(self, job_id: int, role: str, workspace: Path, sessions: sessionmaker[Session],
                  archive, cfg: AgentsConfig, policy: Policy, now: pd.Timestamp | None = None):
         if role not in ROLE_TOOLS:
@@ -239,7 +245,7 @@ exits happen on bar closes. Gross exposure is capped at 1.0 of the bot's equity.
         """Every bot in the arena with its strategy, interval, stage, capital and latest verdict."""
         with self.sessions() as s:
             rows = []
-            for bot in s.scalars(select(Bot).order_by(Bot.id)).all():
+            for bot in s.scalars(select(Bot).where(Bot.group == ARENA).order_by(Bot.id)).all():
                 ev = s.scalars(select(Evaluation).where(Evaluation.bot_id == bot.id)
                                .order_by(Evaluation.id.desc()).limit(1)).first()
                 rows.append({"slug": bot.slug, "strategy": f"{bot.strategy.name}@{bot.strategy.version}",
@@ -286,7 +292,7 @@ exits happen on bar closes. Gross exposure is capped at 1.0 of the bot's equity.
     def get_graveyard(self, limit: int = 20) -> str:
         """Eradicated bots and why they died. Do not resubmit these ideas unchanged."""
         with self.sessions() as s:
-            bots = s.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED)
+            bots = s.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED, Bot.group == ARENA)
                              .order_by(Bot.stage_since.desc()).limit(min(limit, 50))).all()
             out = [{"slug": b.slug, "strategy": f"{b.strategy.name}@{b.strategy.version}",
                     "interval": b.strategy.interval, "params": b.params,
@@ -456,10 +462,14 @@ exits happen on bar closes. Gross exposure is capped at 1.0 of the bot's equity.
             sub = self._audit_target(s, submission_id)
             calls = s.scalars(select(ToolCall).where(ToolCall.job_id == sub.job_id,
                                                      ToolCall.tool.in_(("run_backtest", "run_walkforward",
-                                                                        "submit_strategy")))
+                                                                        "submit_strategy", "run_options_backtest",
+                                                                        "submit_options_strategy")))
                               .order_by(ToolCall.id)).all()
             trail = [{"tool": c.tool, "args": {k: v for k, v in c.args.items() if k != "rationale"},
                       "trials": c.trials, "ok": c.ok} for c in calls]
+            if sub.interval == "opt":
+                return (json.dumps(self._options_submission_view(sub) | {"research_trail": trail}, indent=1,
+                                   default=str) + "\n\n## Source\n```python\n" + sub.source + "\n```")
             h = sub.holdout_metrics
             out = {"submission_id": sub.id, "strategy": f"{sub.name}@{sub.version}",
                    "interval": sub.interval, "rationale": sub.rationale,

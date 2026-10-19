@@ -2,6 +2,34 @@
 {% from "_macros.html" import csrf_field, chip, budget_bars with context %}
 {% block title %}Overview{% endblock %}
 {% block content %}
+<div class="split">
+  <div class="card arena">
+    <h2><a class="title" href="/league">Long-term Arena</a> <span class="muted small">slow, statistical verdicts</span></h2>
+    {% if acct.killed %}<div class="banner kill small">Arena kill switch ON</div>{% endif %}
+    <div class="grid">
+      <div class="stat"><div class="label">Equity</div><div class="value">{{ acct.equity | money }}</div></div>
+      <div class="stat"><div class="label">Today</div><div class="value {{ acct.day_pnl | sign }}">{{ acct.day_pnl | money(true) }}</div>
+        <div class="sub {{ acct.day_return | sign }}">{{ acct.day_return | pct }}</div></div>
+      <div class="stat"><div class="label">Bots</div><div class="value">{{ agents.slots.bots }} / {{ agents.slots.total }}</div>
+        <div class="sub">judged after 2–12 weeks</div></div>
+    </div>
+  </div>
+  <div class="card gauntlet">
+    <h2><a class="title" href="/options">Options Gauntlet</a> <span class="muted small">week of {{ gauntlet.week }} · day {{ gauntlet.day }}/{{ gauntlet.days }}{% if gauntlet.practice %} · practice week{% endif %}</span></h2>
+    {% if gauntlet.killed %}<div class="banner kill small">Options kill switch ON: {{ gauntlet.kill_reason }}</div>{% endif %}
+    <table>
+      {% for r in gauntlet.rows %}
+      <tr class="{{ 'cut' if loop.index == gauntlet.cut_line and not loop.last }} {{ 'danger' if loop.index > gauntlet.cut_line }}">
+        <td class="muted">{{ r.rank }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td>
+        <td class="num {{ r.ret | sign }}">{{ r.ret | pct }}</td><td class="num small {{ r.day_pnl | sign }}">today {{ r.day_pnl | money(true) }}</td>
+        <td class="small">{{ r.open }} open</td></tr>
+      {% else %}<tr><td class="muted">No bots in the gauntlet yet.</td></tr>{% endfor %}
+    </table>
+    <p class="small muted">{% if gauntlet.rows %}<span class="cutlabel">Cut line</span> below rank {{ gauntlet.cut_line }}. {% endif %}Scoring {{ gauntlet.score_at or "after the week's last session" }}.</p>
+  </div>
+</div>
+
+<h2 style="color: var(--arena)">Long-term Arena</h2>
 {% if acct.killed %}
 <div class="banner kill">KILL SWITCH ON — {{ acct.kill_reason }} ({{ acct.kill_at | when }}). The engine is not trading.</div>
 {% endif %}

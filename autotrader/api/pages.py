@@ -14,7 +14,7 @@ from sqlalchemy import select
 from autotrader import views
 from autotrader.api import render
 from autotrader.api.auth import COOKIE, SESSION_DAYS, check_token, new_session, require_login
-from autotrader.api.deps import get_agents_cfg, get_archive, get_policy, get_sessions
+from autotrader.api.deps import get_agents_cfg, get_archive, get_gauntlet_cfg, get_policy, get_sessions
 from autotrader.config import get_settings
 from autotrader.db.models import AgentJob, AuditLog, Report, Submission, ToolCall
 from autotrader.evaluator.jobs import spy_daily_returns
@@ -32,8 +32,12 @@ _failed_logins: list[float] = []
 
 
 def page(request: Request, name: str, **ctx) -> HTMLResponse:
+    ctx.setdefault("section", "arena" if name.split(".")[0] in ARENA_PAGES else "shared")
     return templates.TemplateResponse(request, name, {"csrf": getattr(request.state, "csrf", ""),
                                                       "nav": name.split(".")[0], **ctx})
+
+
+ARENA_PAGES = {"league", "bot", "graveyard"}
 
 
 def _spy(archive):
@@ -80,8 +84,11 @@ def logout():
 
 @router.get("/", response_class=HTMLResponse)
 def overview(request: Request, _=LOGIN, sessions=Depends(get_sessions), archive=Depends(get_archive),
-             cfg=Depends(get_agents_cfg), policy=Depends(get_policy)):
+             cfg=Depends(get_agents_cfg), policy=Depends(get_policy), gcfg=Depends(get_gauntlet_cfg)):
+    from autotrader.api.pages_options import panel
+
     with sessions() as s:
+        gauntlet = panel(s, gcfg)
         acct = views.account_overview(s)
         agents = views.agents_overview(s, cfg, policy, limit=8)
         alerts = views.recent_alerts(s, limit=12)
@@ -89,7 +96,7 @@ def overview(request: Request, _=LOGIN, sessions=Depends(get_sessions), archive=
         table = views.league(s, _spy(archive))
         report = {"date": rep.date, "body_md": rep.body_md, "commentary": rep.commentary} if rep else None
     return page(request, "overview.html", acct=acct, agents=agents, alerts=alerts, report=report,
-                league=table[:5], refresh=60)
+                league=table[:5], gauntlet=gauntlet, refresh=60)
 
 
 @router.get("/league", response_class=HTMLResponse)
@@ -98,9 +105,10 @@ def league_page(request: Request, _=LOGIN, sessions=Depends(get_sessions), archi
     with sessions() as s:
         rows = views.league(s, _spy(archive))
         roster = views.roster(s)
+        fills = views.recent_fills(s, limit=40)
     if sort in ("total_return", "excess_return", "psr", "max_drawdown", "days", "trades", "capital"):
         rows.sort(key=lambda r: r[sort] if r[sort] is not None else float("-inf"), reverse=True)
-    return page(request, "league.html", rows=rows, roster=roster, sort=sort)
+    return page(request, "league.html", rows=rows, roster=roster, sort=sort, fills=fills)
 
 
 @router.get("/bots/{slug}", response_class=HTMLResponse)

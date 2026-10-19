@@ -1,4 +1,5 @@
 :root {
+  --arena: #2f6fde; --gauntlet: #d9480f;
   --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
   --accent: #2f6fde; --good: #1a8a4c; --bad: #c8352e; --warn: #b7791f; --chip: #eef1f6;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -6,7 +7,8 @@
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #0f1218; --panel: #171b23; --text: #e4e7ee; --muted: #8b93a5; --line: #262c38;
-          --accent: #6ea1ff; --good: #48c17c; --bad: #ff6b62; --warn: #e2a73c; --chip: #222835; }
+          --accent: #6ea1ff; --good: #48c17c; --bad: #ff6b62; --warn: #e2a73c; --chip: #222835;
+          --arena: #6ea1ff; --gauntlet: #ff8a4c; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
@@ -14,7 +16,7 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 header.top { display: flex; align-items: center; gap: 18px; padding: 10px 20px;
   background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-header.top .brand { font-weight: 700; letter-spacing: .2px; }
+header.top .brand { font-weight: 700; letter-spacing: .2px; color: var(--text); }
 header.top nav { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
 header.top nav a { padding: 6px 10px; border-radius: 6px; color: var(--text); }
 header.top nav a.on { background: var(--chip); font-weight: 600; }
@@ -73,3 +75,28 @@ input, select, textarea { padding: 6px 8px; border-radius: 6px; border: 1px soli
 .login input { width: 100%; margin: 8px 0 12px; }
 details summary { cursor: pointer; color: var(--muted); }
 .small { font-size: 12px; }
+header.top nav .group { display: flex; gap: 2px; align-items: center; padding: 2px 6px 2px 8px;
+  border-radius: 8px; border: 1px solid transparent; }
+header.top nav .group.arena { border-left: 3px solid var(--arena); }
+header.top nav .group.gauntlet { border-left: 3px solid var(--gauntlet); }
+header.top nav .group.cur { border-color: var(--line); }
+header.top nav .group.arena.cur { border-left-color: var(--arena); }
+header.top nav .group.gauntlet.cur { border-left-color: var(--gauntlet); }
+.glabel { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-right: 4px; }
+.group.arena .glabel { color: var(--arena); } .group.gauntlet .glabel { color: var(--gauntlet); }
+.stripe { padding: 8px 20px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.stripe.arena { background: color-mix(in srgb, var(--arena) 9%, var(--panel)); }
+.stripe.gauntlet { background: color-mix(in srgb, var(--gauntlet) 10%, var(--panel)); }
+.split { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); margin-bottom: 8px; }
+.card.arena { border-top: 3px solid var(--arena); } .card.gauntlet { border-top: 3px solid var(--gauntlet); }
+.card h2 { margin-top: 0; }
+.card.arena h2 a.title { color: var(--arena); } .card.gauntlet h2 a.title { color: var(--gauntlet); }
+tr.cut td { border-bottom: 2px dashed var(--bad); }
+tr.danger td { background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.cutlabel { color: var(--bad); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.chip.culled, .chip.busted { background: color-mix(in srgb, var(--bad) 22%, var(--panel)); }
+.chip.survived, .chip.filled { background: color-mix(in srgb, var(--good) 20%, var(--panel)); }
+.chip.exempt, .chip.new, .chip.practice { background: color-mix(in srgb, var(--warn) 22%, var(--panel)); }
+.chip.canceled, .chip.expired { background: var(--chip); color: var(--muted); }
+svg.chart .zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.legs { font-size: 12px; color: var(--muted); }

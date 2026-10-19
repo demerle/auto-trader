@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    from autotrader.api import actions, pages
+    from autotrader.api import actions, pages, pages_options
 
     app = FastAPI(title="Autotrader", version="0.2.0", lifespan=lifespan,
                   description="Strategy arena dashboard. /signals is the original stochastic scan.",
@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     app.include_router(pages.router)
+    app.include_router(pages_options.router)
     app.include_router(actions.router)
     return app
 

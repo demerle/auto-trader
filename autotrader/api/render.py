@@ -11,11 +11,14 @@ from jinja2 import Undefined
 from markupsafe import Markup
 
 PALETTE = ("var(--accent)", "var(--muted)", "var(--warn)", "var(--good)")
+DISTINCT = ("#2f6fde", "#e8590c", "#2b8a3e", "#ae3ec9", "#c92a2a", "#0c8599", "#e67700", "#5c7cfa")
 
 
 def line_chart(series: list[tuple[str, list[tuple[str, float]]]], width: int = 760,
-               height: int = 260, money: bool = True) -> Markup:
-    """series: [(label, [(iso_ts, value), ...]), ...] sharing one time axis."""
+               height: int = 260, money: bool = True, percent: bool = False,
+               time_fmt: str = "%Y-%m-%d", distinct: bool = False) -> Markup:
+    """series: [(label, [(iso_ts, value), ...]), ...] sharing one time axis.
+    distinct: every series a solid line in its own colour (for races between bots)."""
     pts = [(pd.Timestamp(t), v) for _, s in series for t, v in s if v is not None]
     if len(pts) < 2:
         return Markup('<p class="muted">Not enough data for a chart yet.</p>')
@@ -34,7 +37,8 @@ def line_chart(series: list[tuple[str, list[tuple[str, float]]]], width: int = 7
     def y(v: float) -> float:
         return pad_t + (hi - v) / (hi - lo) * h
 
-    fmt = (lambda v: f"${v:,.0f}") if money else (lambda v: f"{v:,.2f}")
+    fmt = (lambda v: f"{v * 100:+.0f}%") if percent else (lambda v: f"${v:,.0f}") if money \
+        else (lambda v: f"{v:,.2f}")
     out = [f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
            f'preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">']
     for i in range(5):
@@ -43,17 +47,22 @@ def line_chart(series: list[tuple[str, list[tuple[str, float]]]], width: int = 7
                    f'<text class="axis" x="{pad_l - 6}" y="{y(v) + 4:.1f}" text-anchor="end">{fmt(v)}</text>')
     for frac, anchor in ((0, "start"), (0.5, "middle"), (1, "end")):
         ts = pd.Timestamp(int(t0 + (t1 - t0) * frac), tz="UTC")
+        if time_fmt != "%Y-%m-%d":
+            ts = ts.tz_convert("America/New_York")
         out.append(f'<text class="axis" x="{pad_l + w * frac:.1f}" y="{height - 8}" '
-                   f'text-anchor="{anchor}">{ts:%Y-%m-%d}</text>')
+                   f'text-anchor="{anchor}">{ts.strftime(time_fmt)}</text>')
+    if percent and lo < 0 < hi:
+        out.append(f'<line class="zero" x1="{pad_l}" x2="{width - pad_r}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>')
     legend = []
     for i, (label, s) in enumerate(series):
         clean = [(pd.Timestamp(t), v) for t, v in s if v is not None]
         if len(clean) < 2:
             continue
-        color = PALETTE[i % len(PALETTE)]
+        color = DISTINCT[i % len(DISTINCT)] if distinct else PALETTE[i % len(PALETTE)]
+        dashed = not distinct and i > 0
         d = " ".join(f"{'M' if j == 0 else 'L'}{x(t):.1f},{y(v):.1f}" for j, (t, v) in enumerate(clean))
-        out.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{2 if i == 0 else 1.5}"'
-                   f'{"" if i == 0 else " stroke-dasharray=\"4 3\""}><title>{html.escape(label)}</title></path>')
+        out.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{2 if i == 0 or distinct else 1.5}"'
+                   f'{" stroke-dasharray=\"4 3\"" if dashed else ""}><title>{html.escape(label)}</title></path>')
         legend.append(f'<span class="key"><i style="background:{color}"></i>{html.escape(label)}</span>')
     out.append("</svg>")
     return Markup(f'<figure class="chartbox">{"".join(out)}<figcaption>{"".join(legend)}</figcaption></figure>')

@@ -18,6 +18,7 @@ class BrokerOrder:
     status: str
     filled_qty: float = 0.0  # unsigned
     filled_avg_price: float | None = None
+    legs: list[dict] | None = None  # mleg option orders: per-leg symbol/side/ratio/fills
 
     @property
     def terminal(self) -> bool:

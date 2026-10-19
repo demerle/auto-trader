@@ -1,0 +1,33 @@
+# The options gauntlet: 5 bots, $5k each, reset every Monday; bottom 2 culled every Friday.
+# Hard risk limits live in risk.yaml (options:), which only the user edits.
+account: paper-options
+slots: 5
+capital: 5000
+cull: 2                     # bottom N by week return are eradicated after the last session of the week
+min_sessions_to_cull: 3     # a bot that joined later in the week is exempt (unless it busted)
+tick_minutes: 5             # strategies run every 5 minutes from first_tick_et
+first_tick_et: "09:35"
+reset_et: "09:00"           # Monday (first session of the week): every bot back to `capital`
+score_et: "16:30"           # last session of the week: rank, cull, queue replacements
+
+underlyings:                # the only names bots may trade options on
+  etfs: [SPY, QQQ, IWM]     # Alpaca 0DTE cutoff 15:30 ET
+  stocks: [NVDA, TSLA, AAPL, AMD, META, AMZN, MSFT, GOOGL, PLTR]  # cutoff 15:15 ET
+cutoff_et: {etfs: "15:30", stocks: "15:15"}  # Alpaca's last order time on expiration day
+
+chain:
+  max_dte: 45               # contracts further out are dropped (chain size)
+  moneyness: 0.25           # strikes within +-25% of spot
+  refresh_sec: 300          # CBOE refetch per underlying
+  record: true              # keep every snapshot under data/options/
+
+execution:
+  chase_sec: 30             # reprice working orders this often
+  chase_steps: 4            # then cancel; the strategy can ask again next tick
+  chase_frac: 0.25          # each step moves the limit 25% of the spread toward the far side
+  fee_per_contract: 0.05    # regulatory fees (Alpaca charges no options commission)
+
+smoke:                      # entry test for new bots: it must trade and respect the limits
+  sessions: 20
+  min_trades: 5
+practice_until: "2026-10-19"  # weeks starting on or before this Monday are practice: scored, nobody culled

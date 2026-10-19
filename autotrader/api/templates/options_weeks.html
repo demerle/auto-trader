@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Gauntlet weeks{% endblock %}
+{% block content %}
+<h1>Weeks</h1>
+<div class="card table-wrap"><table>
+<tr><th>Week</th><th class="num">Bots</th><th>Winner</th><th class="num">Best</th><th>Culled</th></tr>
+{% for w in weeks %}
+<tr><td><a href="/options/weeks/{{ w.week }}">{{ w.week }}</a>{% if not w.scored %} <span class="chip running">in progress</span>{% endif %}</td>
+  <td class="num">{{ w.bots }}</td><td>{{ w.winner or "-" }}</td><td class="num {{ w.best | sign }}">{{ w.best | pct }}</td>
+  <td>{% for c in w.culled %}<a href="/options/bots/{{ c }}">{{ c }}</a>{{ ", " if not loop.last }}{% else %}<span class="muted">-</span>{% endfor %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">No weeks yet.</td></tr>{% endfor %}
+</table></div>
+<h2>All-time leaderboard <span class="muted small">(weekly returns compounded; each week starts again from $5,000)</span></h2>
+<div class="card table-wrap"><table>
+<tr><th>#</th><th>Bot</th><th>Strategy</th><th class="num">Cumulative</th><th class="num">Best week</th><th class="num">Weeks</th><th class="num">Survived</th><th>Now</th></tr>
+{% for r in alltime %}
+<tr><td class="muted">{{ loop.index }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td><td>{{ r.strategy }}{{ " · agent" if r.author.startswith("job-") }}</td>
+  <td class="num {{ r.cumulative | sign }}">{{ r.cumulative | pct }}</td><td class="num">{{ r.best | pct }}</td>
+  <td class="num">{{ r.weeks }}</td><td class="num">{{ r.survived }}</td><td><span class="chip {{ r.stage }}">{{ "out" if r.stage == "eradicated" else "in" }}</span></td></tr>
+{% else %}<tr><td colspan="8" class="muted">Nothing scored yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

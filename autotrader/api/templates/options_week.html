@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Week {{ week }}{% endblock %}
+{% block content %}
+<h1>Week of {{ week }}</h1>
+<div class="card">{{ line_chart(chart, percent=true, money=false, time_fmt="%a %H:%M", distinct=true) }}</div>
+<h2>Standings</h2>
+<div class="card table-wrap"><table>
+<tr><th class="num">Rank</th><th>Bot</th><th>Strategy</th><th class="num">Return</th><th class="num">Start</th><th class="num">End</th><th class="num">Max DD</th><th class="num">Trades</th><th class="num">Sessions</th><th>Result</th></tr>
+{% for r in rows %}
+<tr class="{{ 'danger' if r.status == 'culled' }}"><td class="num">{{ r.rank or "-" }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td><td class="small">{{ r.strategy }}</td>
+  <td class="num {{ r.ret | sign }}">{{ r.ret | pct }}</td><td class="num">{{ r.start | money }}</td><td class="num">{{ r.end | money }}</td>
+  <td class="num">{{ r.max_dd | pct(false) }}</td><td class="num">{{ r.trades }}</td><td class="num">{{ r.sessions }}</td>
+  <td><span class="chip {{ r.status }}">{{ r.status }}</span>{% if r.busted %} <span class="chip busted">busted</span>{% endif %}</td></tr>
+{% endfor %}
+</table></div>
+{% for r in rows if r.autopsy %}
+<h2>Autopsy: {{ r.slug }}</h2>
+<div class="card"><pre>{{ r.autopsy }}</pre></div>
+{% endfor %}
+{% endblock %}

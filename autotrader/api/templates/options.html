@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field with context %}
+{% from "_gauntlet.html" import trade_table, positions_table with context %}
+{% block title %}Gauntlet{% endblock %}
+{% block content %}
+{% if st.killed %}<div class="banner kill">OPTIONS KILL SWITCH ON: {{ st.kill_reason }}. The gauntlet is not trading (the long-term arena is unaffected).</div>{% endif %}
+{% if st.practice %}<div class="banner warn">Practice week: results are scored and posted, but nobody is culled.</div>{% endif %}
+<h1>Week of {{ st.week }} <span class="muted small">· day {{ st.day }} of {{ st.days }} · scoring {{ st.score_at or "done" }} · bottom {{ st.cull }} culled</span></h1>
+
+<div class="card table-wrap"><table>
+<tr><th>#</th><th>Bot</th><th>Status</th><th class="num">Week</th><th class="num">Equity</th><th class="num">Today</th><th class="num">Closed trades</th><th class="num">Open</th><th class="num">Open risk</th><th>Last tick</th></tr>
+{% for r in st.rows %}
+<tr class="{{ 'cut' if loop.index == st.cut_line and not loop.last }} {{ 'danger' if loop.index > st.cut_line }}">
+  <td class="muted">{{ r.rank }}</td>
+  <td><a href="/options/bots/{{ r.slug }}"><strong>{{ r.slug }}</strong></a><div class="legs">{{ r.strategy }}{{ " · agent" if r.author.startswith("job-") else " · seed" }}</div></td>
+  <td><span class="chip {{ r.status.split(' ')[0] }}">{{ r.status }}</span></td>
+  <td class="num {{ r.ret | sign }}"><strong>{{ r.ret | pct }}</strong></td>
+  <td class="num">{{ r.equity | money }}</td>
+  <td class="num {{ r.day_pnl | sign }}">{{ r.day_pnl | money(true) }}</td>
+  <td class="num">{{ r.trades }}</td><td class="num">{{ r.open }}</td>
+  <td class="num">{{ r.open_risk | money }}</td>
+  <td class="small">{% if r.last_plan.at %}{{ r.last_plan.at | when }}{% if r.last_plan.frozen %} <span class="chip busted">{{ r.last_plan.frozen }}</span>{% endif %}
+    {% if r.last_plan.rejected %}<div class="legs">refused: {{ r.last_plan.rejected[0] | truncate(90) }}</div>{% endif %}{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="10" class="muted">No bots in the gauntlet yet. Seed it with <code>autotrader options seed</code>.</td></tr>{% endfor %}
+</table>
+{% if st.rows %}<p class="small"><span class="cutlabel">— — cut line —</span> <span class="muted">rows below it would be culled if the week ended now (bots with fewer than 3 sessions this week are exempt). <a href="/options/cull-preview">Preview the scoring →</a></span></p>{% endif %}
+</div>
+
+<h2>This week's race <span class="muted small">(return since the week's start; snapshots every 5 minutes)</span></h2>
+<div class="card">{{ line_chart(chart, percent=true, money=false, time_fmt="%a %H:%M", distinct=true) }}
+<p class="muted small">Marks use CBOE's ~15-minute-delayed IV repriced at the live underlying price.</p></div>
+
+<div class="cols">
+  <div>
+    <h2>Open positions</h2>
+    {% for r in st.rows %}
+    <div class="card" style="margin-bottom:10px"><strong><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></strong>
+      {{ positions_table(r.position_rows) }}</div>
+    {% endfor %}
+  </div>
+  <div>
+    <h2>Latest trades <a class="small" href="/options/trades">all →</a></h2>
+    {{ trade_table(feed) }}
+    <h2>Controls</h2>
+    <div class="card">
+      {% if st.killed %}
+      <form method="post" action="/actions/options/unkill" data-confirm="Turn the options kill switch off? The gauntlet trades again on its next tick.">
+        {{ csrf_field() }}<button type="submit">Turn options kill switch off</button></form>
+      {% else %}
+      <form method="post" action="/actions/options/kill" data-confirm="OPTIONS KILL SWITCH: cancel every options order and close every options position at market?">
+        {{ csrf_field() }}
+        <div class="actions"><input name="reason" placeholder="Reason" maxlength="200">
+        <input name="confirm" placeholder="Type KILL" required pattern="[Kk][Ii][Ll][Ll]" size="9">
+        <button type="submit" class="danger">Options kill switch</button></div>
+        <p class="muted small">Only the options account. The long-term arena keeps trading.</p>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

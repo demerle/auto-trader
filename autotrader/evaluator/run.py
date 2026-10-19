@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from autotrader.alerts import alert
-from autotrader.db.models import AgentJob, Bot, BotStage, Evaluation, utcnow
+from autotrader.db.models import ARENA, AgentJob, Bot, BotStage, Evaluation, utcnow
 from autotrader.evaluator.decide import Verdict, decide
 from autotrader.evaluator.policy import Policy
 from autotrader.evaluator.record import PaperRecord, build_record
@@ -53,7 +53,7 @@ def autopsy(bot: Bot, rec: PaperRecord, verdict: Verdict) -> str:
 
 def evaluate_all(session: Session, policy: Policy, spy_returns: pd.Series | None,
                  apply: bool = True) -> list[Outcome]:
-    bots = session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES))
+    bots = session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES), Bot.group == ARENA)
                            .order_by(Bot.id)).all()
     records = {b.id: build_record(session, b, spy_returns) for b in bots}
 

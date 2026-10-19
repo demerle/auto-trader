@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autotrader.db.models import (
-    AgentJob, AgentNote, Alert, Bot, BotStage, CashFlow, EquitySnapshot, Evaluation, Fill,
+    ARENA, AgentJob, AgentNote, Alert, Bot, BotStage, CashFlow, EquitySnapshot, Evaluation, Fill,
     Report, Submission,
 )
 from autotrader.engine.state import KILL_SWITCH, get_state
@@ -61,7 +61,7 @@ def latest_snapshot(session: Session, bot_id: int, before=None) -> EquitySnapsho
 def league(session: Session, spy_returns: pd.Series | None) -> list[dict]:
     """Bots under evaluation ranked by paper Sharpe (best first)."""
     rows = []
-    for bot in session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES)).order_by(Bot.id)):
+    for bot in session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES), Bot.group == ARENA).order_by(Bot.id)):
         rec = build_record(session, bot, spy_returns)
         m = rec.metrics
         rows.append({
@@ -78,13 +78,24 @@ def league(session: Session, spy_returns: pd.Series | None) -> list[dict]:
 def roster(session: Session) -> list[dict]:
     """Every bot with its last equity snapshot."""
     out = []
-    for bot in session.scalars(select(Bot).order_by(Bot.id)):
+    for bot in session.scalars(select(Bot).where(Bot.group == ARENA).order_by(Bot.id)):
         snap = latest_snapshot(session, bot.id)
         out.append({"slug": bot.slug, "strategy": f"{bot.strategy.name}@{bot.strategy.version}",
                     "interval": bot.strategy.interval, "stage": bot.stage.value,
                     "capital": bot.capital, "equity": snap.equity if snap else None,
                     "positions": dict(snap.positions) if snap else {},
                     "paused_until": bot.paused_until.isoformat() if bot.paused_until else None})
+    return out
+
+
+def recent_fills(session: Session, limit: int = 40) -> list[dict]:
+    """The arena's latest fills (newest first), with the order behind each."""
+    rows = session.execute(select(Fill, Bot.slug).join(Bot, Bot.id == Fill.bot_id)
+                           .where(Bot.group == ARENA).order_by(Fill.id.desc()).limit(limit)).all()
+    out = []
+    for f, slug in rows:
+        out.append({"ts": f.filled_at.isoformat() if f.filled_at else None, "bot": slug, "symbol": f.symbol,
+                    "qty": f.qty, "price": f.price, "value": f.qty * f.price, "internal": f.internal})
     return out
 
 
@@ -163,7 +174,7 @@ def bot_detail(session: Session, slug: str, spy_returns: pd.Series | None = None
 
 
 def graveyard(session: Session, limit: int = 100) -> list[dict]:
-    bots = session.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED)
+    bots = session.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED, Bot.group == ARENA)
                            .order_by(Bot.stage_since.desc()).limit(limit)).all()
     return [{"slug": b.slug, "strategy": f"{b.strategy.name}@{b.strategy.version}",
              "interval": b.strategy.interval, "died": b.stage_since.isoformat(),
@@ -178,7 +189,7 @@ def account_overview(session: Session, now: pd.Timestamp | None = None) -> dict:
     day_start, _ = et_day_bounds(today_et(now))
     equity = prev = capital = 0.0
     stages: dict[str, int] = {}
-    for bot in session.scalars(select(Bot)):
+    for bot in session.scalars(select(Bot).where(Bot.group == ARENA)):
         stages[bot.stage.value] = stages.get(bot.stage.value, 0) + 1
         if bot.stage not in HELD_STAGES:
             continue

@@ -33,9 +33,12 @@ def working_qty(session: Session, bot: Bot) -> dict[str, float]:
     return dict(out)
 
 
-def ledger_positions(session: Session) -> dict[str, float]:
-    """Sum of all bots' positions per symbol (what the broker should hold)."""
+def ledger_positions(session: Session, account: str | None = None) -> dict[str, float]:
+    """Sum of all bots' positions per symbol (what the broker account should hold)."""
     out: dict[str, float] = defaultdict(float)
-    for symbol, qty in session.execute(select(Fill.symbol, Fill.qty)).all():
+    q = select(Fill.symbol, Fill.qty)
+    if account is not None:
+        q = q.join(Bot, Bot.id == Fill.bot_id).where(Bot.account == account)
+    for symbol, qty in session.execute(q).all():
         out[symbol] += qty
     return {s: q for s, q in out.items() if abs(q) > 1e-9}

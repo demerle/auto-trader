@@ -33,7 +33,7 @@ def _json_default(obj):
     return str(obj)
 
 
-def load_strategy_class(path: str) -> type[Strategy]:
+def load_strategy_class(path: str, base: type = Strategy) -> type:
     source = Path(path).read_text()
     if problems := lint_source(source):
         raise ValueError("lint failed: " + "; ".join(problems))
@@ -45,10 +45,10 @@ def load_strategy_class(path: str) -> type[Strategy]:
     sys.modules[mod_name] = module
     spec.loader.exec_module(module)
     found = [obj for obj in vars(module).values()
-             if isinstance(obj, type) and issubclass(obj, Strategy) and obj is not Strategy
+             if isinstance(obj, type) and issubclass(obj, base) and obj is not base
              and obj.__module__ == mod_name and not getattr(obj, "__abstractmethods__", None)]
     if len(found) != 1:
-        raise ValueError(f"expected exactly one Strategy subclass in {path}, found {len(found)}")
+        raise ValueError(f"expected exactly one {base.__name__} subclass in {path}, found {len(found)}")
     return found[0]
 
 
@@ -125,7 +125,43 @@ def op_gate(state: dict, req: dict) -> dict:
             "metrics": res.metrics, "holdout": res.holdout}
 
 
-OPS = {"load": op_load, "features": op_features, "on_bar": op_on_bar, "validate": op_validate,
+# ----- option strategies (the gauntlet) -----
+
+def op_opt_load(state: dict, req: dict) -> dict:
+    from autotrader.options.strategy import OptionStrategy
+
+    cls = load_strategy_class(req["path"], OptionStrategy)
+    strategy = cls(req.get("params") or {})
+    state.update(cls=cls, strategy=strategy, params=strategy.params.model_dump(mode="json"))
+    return {"meta": {"name": cls.name, "version": cls.version, "underlyings": list(cls.underlyings),
+                     "description": cls.description, "thesis": cls.thesis, "params": state["params"]}}
+
+
+def op_opt_tick(state: dict, req: dict) -> dict:
+    from autotrader.options.strategy import encode_targets
+
+    return {"targets": encode_targets(state["strategy"].on_tick(req["ctx"]))}
+
+
+def op_opt_simulate(state: dict, req: dict) -> dict:
+    """Run the whole simulation in here, so the strategy never leaves the sandbox."""
+    from autotrader.options.sim import simulate
+    from autotrader.options.strategy import decode_targets, encode_targets
+
+    strategy = state["cls"](req.get("params") or state["params"])
+    h = req["history"]
+
+    def on_tick(ctx):  # round-trip through the wire format so live and sim see the same validation
+        return decode_targets(encode_targets(strategy.on_tick(ctx)))
+
+    res = simulate(on_tick, tuple(strategy.underlyings), h["bars5m"], h["daily"], h["vix"], h["vix1d"],
+                   req["start"], req["end"], req["cfg"], req["limits"], capital=req.get("capital"))
+    return {"summary": res.summary(), "min_worst_equity": res.min_worst_equity,
+            "trades": res.trades[-200:], "errors": res.errors}
+
+
+OPS = {"opt_load": op_opt_load, "opt_tick": op_opt_tick, "opt_simulate": op_opt_simulate,
+       "load": op_load, "features": op_features, "on_bar": op_on_bar, "validate": op_validate,
        "backtest": op_backtest, "walkforward": op_walkforward, "gate": op_gate}
 
 

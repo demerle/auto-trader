@@ -12,7 +12,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from autotrader.db.models import Bot, CashFlow
+from autotrader.db.models import ARENA, Bot, CashFlow
 from autotrader.evaluator.policy import Policy
 from autotrader.evaluator.record import build_record, shrunk_sharpe
 from autotrader.evaluator.run import EVALUATED_STAGES
@@ -28,7 +28,7 @@ class Move:
 
 def plan_allocation(session: Session, policy: Policy) -> list[Move]:
     a = policy.allocator
-    bots = session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES)).order_by(Bot.id)).all()
+    bots = session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES), Bot.group == ARENA).order_by(Bot.id)).all()
     if not bots:
         return []
     scores, mults = {}, {}

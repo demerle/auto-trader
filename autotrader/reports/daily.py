@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from autotrader.alerts import post_report
 from autotrader.config import get_settings
-from autotrader.db.models import AgentJob, Bot, Evaluation, Report, Submission, utcnow
+from autotrader.db.models import ARENA, AgentJob, Bot, Evaluation, Report, Submission, utcnow
 from autotrader.engine.state import get_state
 from autotrader.views import (
     account_overview, et_day_bounds, league, num, recent_alerts, today_et,
@@ -55,11 +55,11 @@ def build_daily_report(session: Session, day: str, spy_returns: pd.Series | None
                for e, b in verdicts if e.decision != "keep"]
     new_bots = [{"slug": b.slug, "strategy": f"{b.strategy.name}@{b.strategy.version}",
                  "interval": b.strategy.interval, "author": b.strategy.author}
-                for b in session.scalars(select(Bot).where(Bot.created_at >= start, Bot.created_at < end))]
+                for b in session.scalars(select(Bot).where(Bot.created_at >= start, Bot.created_at < end, Bot.group == ARENA))]
 
     jobs = session.scalars(select(AgentJob).where(AgentJob.finished_at >= start,
                                                   AgentJob.finished_at < end)).all()
-    job_counts = Counter((j.agent, j.status) for j in jobs)
+    job_counts = Counter((j.agent, j.status) for j in jobs if j.status not in ("queued", "running"))
     spent_today = sum(j.cost_usd or 0.0 for j in session.scalars(
         select(AgentJob).where(AgentJob.started_at >= start, AgentJob.started_at < end)))
     chk = budget.check(session, "researcher", cfg, now)
@@ -92,6 +92,10 @@ def build_daily_report(session: Session, day: str, spy_returns: pd.Series | None
     if not table:
         lines.append("No bots under evaluation yet.")
 
+    gauntlet = _gauntlet(session, now, start)
+    if gauntlet:
+        lines += ["", "## Options Gauntlet"] + gauntlet["lines"]
+
     lines += ["", "## Today's verdicts"]
     if verdicts:
         lines.append(", ".join(f"{n} {d}" for d, n in sorted(decisions.items())))
@@ -123,8 +127,35 @@ def build_daily_report(session: Session, day: str, spy_returns: pd.Series | None
             "agents": {"spent_today": spent_today, "spend": chk.spend, "limits": chk.limits,
                        "jobs": [{"agent": a, "status": s, "n": n} for (a, s), n in job_counts.items()],
                        "submissions": subs, "paused": paused or None},
-            "alerts": alerts[:20], "slots": {"total": policy.slots, "bots": n_active, "open": n_open}}
+            "alerts": alerts[:20], "slots": {"total": policy.slots, "bots": n_active, "open": n_open},
+            "gauntlet": (gauntlet or {}).get("data")}
     return "\n".join(lines), data
+
+
+def _gauntlet(session: Session, now: pd.Timestamp, day_start) -> dict | None:
+    """Standings of the options gauntlet (its own account, weekly competition)."""
+    from autotrader.options import views as ov
+
+    try:
+        st = ov.standings(session, now)
+    except Exception:  # noqa: BLE001 - the arena report must not fail because of the gauntlet
+        log.exception("gauntlet section failed")
+        return None
+    if not st["rows"]:
+        return None
+    feed = [t for t in ov.trade_feed(session, limit=500, since=day_start) if t["filled"]]
+    lines = [f"Week of {st['week']}, day {st['day']}/{st['days']}"
+             + (" (practice, no cull)" if st["practice"] else f"; bottom {st['cull']} culled after the last session")
+             + f" · {len(feed)} fills today" + (" · **options kill switch ON**" if st["killed"] else "")]
+    for r in st["rows"]:
+        cut = " ✂️" if r["rank"] > st["cut_line"] else ""
+        lines.append(f"{r['rank']}. **{r['slug']}** {_pct(r['ret'])} this week ({'+' if r['day_pnl'] >= 0 else ''}"
+                     f"{_usd(r['day_pnl'])} today), {r['trades']} closed trades, {r['open']} open"
+                     f"{' · ' + r['status'] if r['status'] not in ('active', 'running') else ''}{cut}")
+    data = {"week": st["week"], "standings": [{k: r[k] for k in ("rank", "slug", "ret", "day_pnl", "trades",
+                                                                  "open", "status")} for r in st["rows"]],
+            "fills_today": len(feed)}
+    return {"lines": lines, "data": data}
 
 
 def publish_daily_report(sessions: sessionmaker[Session], archive, day: str | None = None,

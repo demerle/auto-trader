@@ -41,6 +41,7 @@ services:
     volumes:
       - bars:/app/data
       - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro
+      - ./autotrader/options/generated:/app/autotrader/options/generated:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -61,6 +62,17 @@ services:
     volumes:
       - bars:/app/data
       - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # The options gauntlet: its own paper account (ALPACA_OPTIONS_* in .env), its own loop.
+  options-engine:
+    <<: *app
+    command: ["autotrader", "options", "engine"]
+    volumes:
+      - bars:/app/data
+      - ./autotrader/options/generated:/app/autotrader/options/generated:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -87,6 +99,7 @@ services:
       - bars:/app/data
       - ./workspace:/app/workspace
       - ./autotrader/strategies/generated:/app/autotrader/strategies/generated
+      - ./autotrader/options/generated:/app/autotrader/options/generated
       - ./secrets/opencode-go.json:/run/secrets/opencode-auth.json:ro
       - ./autotrader/config/agents.yaml:/app/autotrader/config/agents.yaml:ro  # the model setting
     cap_drop: [ALL]

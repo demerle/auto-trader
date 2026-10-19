@@ -13,6 +13,22 @@ class RiskConfigError(RuntimeError):
     pass
 
 
+class OptionRiskLimits(BaseModel):
+    """The options gauntlet's hard limits (its own account). Defined risk only."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_structure_risk_pct: float = 0.60  # worst-case loss of one new structure / bot equity
+    max_contracts_per_order: int = 50
+    max_open_structures: int = 10
+    max_legs: int = 4
+    bust_equity: float = 250.0  # below this the bot is frozen for the rest of the week
+    open_cutoff_min: int = 45  # no new positions in an expiring contract this close to its cutoff
+    flatten_cutoff_min: int = 10  # expiring positions are closed this long before the cutoff
+    friday_flat_et: str = "15:45"  # everything flat before the weekly scoring
+    account_max_drawdown_pct: float = 0.30  # options account -> options kill switch only
+
+
 class RiskLimits(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -23,6 +39,7 @@ class RiskLimits(BaseModel):
     allow_short: bool = True
     bot_daily_loss_pct: float = 0.05
     account_max_drawdown_pct: float = 0.20
+    options: OptionRiskLimits = OptionRiskLimits()
 
 
 def _sig_path(path: Path) -> Path:

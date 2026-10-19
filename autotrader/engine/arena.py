@@ -23,7 +23,7 @@ from autotrader.data.calendar import drop_incomplete, is_open, session_for
 from autotrader.data.intervals import PERIODS_PER_YEAR, Interval
 from autotrader.data.quality import check_bars
 from autotrader.db.models import Bot, BotStage, EquitySnapshot, StrategyVersion
-from autotrader.engine.state import ACCOUNT_HWM, KILL_SWITCH, get_state, is_killed, set_state
+from autotrader.engine.state import ACCOUNT_HWM, KILL_SWITCH, account_key, get_state, is_killed, set_state
 from autotrader.ledger.book import Book
 from autotrader.ledger.store import load_book, working_qty
 from autotrader.risk.limits import RiskLimits, clamp_targets
@@ -200,7 +200,7 @@ class Arena:
         session = self.sessions()
         try:
             self.desk.sync(session)
-            if is_killed(session):
+            if is_killed(session, self.broker.account):
                 report.notes.append("kill switch is ON; not trading")
                 session.commit()
                 return report
@@ -276,8 +276,9 @@ class Arena:
 
     def _check_account_drawdown(self, session: Session, report: TickReport) -> None:
         equity = self.broker.equity()
-        hwm = max(get_state(session, ACCOUNT_HWM).get("equity", equity), equity)
-        set_state(session, ACCOUNT_HWM, {"equity": hwm})
+        key = account_key(ACCOUNT_HWM, self.broker.account)
+        hwm = max(get_state(session, key).get("equity", equity), equity)
+        set_state(session, key, {"equity": hwm})
         if equity < hwm * (1 - self.limits.account_max_drawdown_pct):
             report.notes.append(f"account drawdown {equity / hwm - 1:.1%} breached limit")
             self._kill(session, f"account drawdown {equity / hwm - 1:.1%}", report)
@@ -292,10 +293,11 @@ class Arena:
 
     def _kill(self, session: Session, reason: str, report: TickReport) -> None:
         now = pd.Timestamp.now(tz="UTC")
-        set_state(session, KILL_SWITCH, {"on": True, "reason": reason, "at": now.isoformat()})
+        set_state(session, account_key(KILL_SWITCH, self.broker.account),
+                  {"on": True, "reason": reason, "at": now.isoformat()})
         self.desk.cancel_working(session)
         intents, prices = [], {}
-        for bot in session.scalars(select(Bot)).all():
+        for bot in session.scalars(select(Bot).where(Bot.account == self.broker.account)).all():
             bot.target_qty = {}
             for s, q in load_book(session, bot).qty.items():
                 intents.append(Intent(bot.id, s, -q, {"kill": reason}))
@@ -318,5 +320,5 @@ class Arena:
 
     def unkill(self) -> None:
         with self.sessions() as session:
-            set_state(session, KILL_SWITCH, {"on": False})
+            set_state(session, account_key(KILL_SWITCH, self.broker.account), {"on": False})
             session.commit()

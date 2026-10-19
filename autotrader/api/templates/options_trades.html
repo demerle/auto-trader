@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% from "_gauntlet.html" import trade_table with context %}
+{% block title %}Gauntlet trades{% endblock %}
+{% block content %}
+<h1>Trades{% if bot %}: {{ bot }} <a class="small" href="/options/trades">(all bots)</a>{% endif %}</h1>
+<p class="muted small">Every options order, newest first. Orders start at the mid and are chased toward the far side every 30 seconds; "chase n" is the step. Prices are per share (one contract = 100 shares).</p>
+{{ trade_table(feed, show_bot=not bot) }}
+{% endblock %}

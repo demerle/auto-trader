@@ -112,7 +112,8 @@ class Desk:
         self.costs = costs
 
     def working_symbols(self, session: Session) -> set[str]:
-        rows = session.scalars(select(Order.symbol).where(Order.status.not_in(TERMINAL))).all()
+        rows = session.scalars(select(Order.symbol).where(Order.status.not_in(TERMINAL),
+                                                          Order.account == self.broker.account)).all()
         return set(rows)
 
     def execute(
@@ -166,7 +167,8 @@ class Desk:
     def sync(self, session: Session) -> int:
         """Pull fills for every working order and attribute them to bots. Returns new fills."""
         new_fills = 0
-        for order in session.scalars(select(Order).where(Order.status.not_in(TERMINAL))).all():
+        for order in session.scalars(select(Order).where(Order.status.not_in(TERMINAL),
+                                                         Order.account == self.broker.account)).all():
             if order.broker_order_id is None:
                 continue
             bo = self.broker.get_order(order.client_order_id)
@@ -194,7 +196,7 @@ class Desk:
     def cancel_working(self, session: Session, interval: str | None = None,
                        wait_sec: float = 10.0) -> int:
         """Cancel working orders and wait (briefly) until the broker confirms them terminal."""
-        q = select(Order).where(Order.status.not_in(TERMINAL))
+        q = select(Order).where(Order.status.not_in(TERMINAL), Order.account == self.broker.account)
         if interval is not None:
             q = q.where(Order.interval == interval)
         orders = [o for o in session.scalars(q).all() if o.broker_order_id is not None]

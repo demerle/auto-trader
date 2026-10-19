@@ -1,0 +1,25 @@
+{% macro trade_table(feed, show_bot=true) %}
+<div class="card table-wrap"><table>
+<tr><th>Time (ET)</th>{% if show_bot %}<th>Bot</th>{% endif %}<th>Action</th><th>Structure</th><th class="num">Qty</th><th>Status</th><th class="num">Price</th><th class="num">Mid</th><th>Why</th></tr>
+{% for t in feed %}
+<tr><td class="small">{{ t.time }}</td>
+  {% if show_bot %}<td><a href="/options/bots/{{ t.bot }}">{{ t.bot }}</a></td>{% endif %}
+  <td>{{ t.intent }}</td>
+  <td>{{ t.structure }} <span class="legs">[{{ t.tag }}]</span></td>
+  <td class="num">{{ t.filled | fnum(0) }}/{{ t.qty }}</td>
+  <td><span class="chip {{ t.status }}">{{ t.status }}</span>{% if t.chase %} <span class="muted small">chase {{ t.chase }}</span>{% endif %}</td>
+  <td class="num">{{ t.price | fnum }}</td><td class="num muted">{{ t.mid | fnum }}</td>
+  <td class="small">{{ t.reason }}{% if t.error %} <span class="neg">{{ t.error | truncate(160) }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="9" class="muted">No trades yet.</td></tr>{% endfor %}
+</table></div>
+{% endmacro %}
+{% macro positions_table(rows) %}
+<table>
+<tr><th>Tag</th><th>Structure</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Mark</th><th class="num">P&amp;L</th></tr>
+{% for p in rows %}
+<tr><td class="small">{{ p.tag }}</td><td>{{ p.what }}{% if p.note %}<div class="legs">{{ p.note }}</div>{% endif %}</td>
+  <td class="num">{{ p.qty }}</td><td class="num">{{ p.entry | fnum }}</td><td class="num">{{ p.mark | fnum }}</td>
+  <td class="num {{ p.pnl | sign }}">{{ p.pnl | money(true) }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Flat.</td></tr>{% endfor %}
+</table>
+{% endmacro %}

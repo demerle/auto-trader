@@ -11,14 +11,29 @@
 <body>
 {% if nav != "login" %}
 <header class="top">
-  <span class="brand">Autotrader</span>
+  <a class="brand" href="/">Autotrader</a>
   <nav>
-    {% for key, label, href in [("overview","Overview","/"),("league","League","/league"),("agents","Agents","/agents"),("reports","Reports","/reports"),("graveyard","Graveyard","/graveyard"),("audit","Log","/audit")] %}
-    <a href="{{ href }}" class="{{ 'on' if nav == key or (key == 'agents' and nav in ('job','submission')) or (key == 'reports' and nav == 'report') or (key == 'league' and nav == 'bot') }}">{{ label }}</a>
-    {% endfor %}
+    <div class="group shared"><a href="/" class="{{ 'on' if nav == 'overview' }}">Home</a></div>
+    <div class="group arena {{ 'cur' if section == 'arena' }}"><span class="glabel">Long-term Arena</span>
+    {% for key, label, href in [("league","League","/league"),("graveyard","Graveyard","/graveyard")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key == 'league' and nav == 'bot') }}">{{ label }}</a>
+    {% endfor %}</div>
+    <div class="group gauntlet {{ 'cur' if section == 'gauntlet' }}"><span class="glabel">Options Gauntlet</span>
+    {% for key, label, href in [("options","Standings","/options"),("options_trades","Trades","/options/trades"),("options_weeks","Weeks","/options/weeks"),("options_graveyard","Graveyard","/options/graveyard")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key == 'options' and nav in ('options_bot','options_cull')) or (key == 'options_weeks' and nav == 'options_week') }}">{{ label }}</a>
+    {% endfor %}</div>
+    <div class="group shared">
+    {% for key, label, href in [("agents","Agents","/agents"),("reports","Reports","/reports"),("audit","Log","/audit")] %}
+    <a href="{{ href }}" class="{{ 'on' if nav == key or (key == 'agents' and nav in ('job','submission')) or (key == 'reports' and nav == 'report') }}">{{ label }}</a>
+    {% endfor %}</div>
   </nav>
   <form method="post" action="/logout" class="inline"><button type="submit">Log out</button></form>
 </header>
+{% if section == "arena" %}
+<div class="stripe arena"><strong>Long-term Arena</strong> · slow, statistical verdicts: equity bots trade daily/intraday on paper for 2–12 weeks before they are judged; proven bots can be promoted to real money (with your approval).</div>
+{% elif section == "gauntlet" %}
+<div class="stripe gauntlet"><strong>Options Gauntlet</strong> · a weekly death match on its own paper account: 5 options bots, $5,000 each, reset every Monday; the bottom 2 are culled after the week's last session and replaced by new agent research. Paper only, never live.</div>
+{% endif %}
 {% endif %}
 <main>
 {% block content %}{% endblock %}

@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from autotrader.alerts import alert
 from autotrader.api.auth import require_csrf
-from autotrader.api.deps import arena_factory, get_sessions
+from autotrader.api.deps import arena_factory, gauntlet_factory, get_sessions
 from autotrader.db.models import AuditLog, Bot
 from autotrader.orchestrator import control
 
@@ -28,6 +28,14 @@ def _audit(sessions, request: Request, action: str, target: str = "", **detail) 
     with sessions() as s:
         s.add(AuditLog(action=action, target=target, detail={"client": client, **detail}))
         s.commit()
+
+
+def _bot_page(sessions, slug: str) -> str:
+    from autotrader.db.models import OPTIONS
+
+    with sessions() as s:
+        bot = s.scalars(select(Bot).where(Bot.slug == slug)).first()
+        return f"/options/bots/{slug}" if bot is not None and bot.group == OPTIONS else f"/bots/{slug}"
 
 
 @router.post("/kill")
@@ -61,7 +69,7 @@ def pause_bot(request: Request, slug: str, _=CSRF, sessions=Depends(get_sessions
         s.commit()
     _audit(sessions, request, "pause_bot", slug)
     alert(f"Bot {slug} paused", "Paused from the dashboard: it keeps its positions but takes no new risk.")
-    return RedirectResponse(f"/bots/{slug}", status_code=303)
+    return RedirectResponse(_bot_page(sessions, slug), status_code=303)
 
 
 @router.post("/bots/{slug}/unpause")
@@ -74,7 +82,7 @@ def unpause_bot(request: Request, slug: str, _=CSRF, sessions=Depends(get_sessio
         s.commit()
     _audit(sessions, request, "unpause_bot", slug)
     alert(f"Bot {slug} unpaused", "Unpaused from the dashboard.")
-    return RedirectResponse(f"/bots/{slug}", status_code=303)
+    return RedirectResponse(_bot_page(sessions, slug), status_code=303)
 
 
 @router.post("/agents/pause")
@@ -122,3 +130,26 @@ def queue_research(request: Request, interval: str = Form(...), note: str = Form
         job_id = job.id
     _audit(sessions, request, "queue_research", str(job_id), interval=interval, note=note[:500])
     return RedirectResponse("/agents", status_code=303)
+
+
+# ----- the options gauntlet (its own account and kill switch) -----
+
+@router.post("/options/kill")
+async def options_kill(request: Request, reason: str = Form(""), confirm: str = Form(""), _=CSRF,
+                       sessions=Depends(get_sessions), gauntlet_factory=Depends(gauntlet_factory)):
+    if confirm.strip().upper() != "KILL":
+        raise HTTPException(400, "type KILL to confirm")
+    why = f"dashboard: {reason.strip() or 'no reason given'}"
+    _audit(sessions, request, "options_kill", "gauntlet", reason=why)
+    report = await run_in_threadpool(lambda: gauntlet_factory().kill(why))  # alerts by itself
+    log.warning("options kill switch from dashboard: %s", report)
+    return RedirectResponse("/options", status_code=303)
+
+
+@router.post("/options/unkill")
+async def options_unkill(request: Request, _=CSRF, sessions=Depends(get_sessions),
+                         gauntlet_factory=Depends(gauntlet_factory)):
+    _audit(sessions, request, "options_unkill", "gauntlet")
+    await run_in_threadpool(lambda: gauntlet_factory().unkill())
+    alert("Options kill switch off", "Turned off from the dashboard; the gauntlet trades again.", priority="high")
+    return RedirectResponse("/options", status_code=303)

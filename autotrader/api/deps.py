@@ -32,6 +32,23 @@ def arena_factory():
     return get_arena
 
 
+def get_gauntlet():
+    """The options gauntlet (options account keys from .env), built only for its kill/unkill."""
+    from autotrader.options.cli import gauntlet
+
+    return gauntlet()
+
+
+def gauntlet_factory():
+    return get_gauntlet
+
+
+def get_gauntlet_cfg():
+    from autotrader.options.config import load_gauntlet_config
+
+    return load_gauntlet_config()
+
+
 def get_agents_cfg():
     from autotrader.orchestrator.config import load_agents_config
 

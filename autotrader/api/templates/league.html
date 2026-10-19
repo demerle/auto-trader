@@ -36,4 +36,13 @@
   <td class="small">{% for s, q in r.positions.items() %}{{ s }} {{ q | fnum(0) }}{{ ", " if not loop.last }}{% else %}<span class="muted">flat</span>{% endfor %}</td></tr>
 {% endfor %}
 </table></div>
+
+<h2>Recent fills</h2>
+<div class="card table-wrap"><table>
+<tr><th>Time</th><th>Bot</th><th>Symbol</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Value</th></tr>
+{% for f in fills %}
+<tr><td class="small">{{ f.ts | when }}</td><td><a href="/bots/{{ f.bot }}">{{ f.bot }}</a></td><td>{{ f.symbol }}{% if f.internal %} <span class="muted small">crossed</span>{% endif %}</td>
+  <td class="num {{ f.qty | sign }}">{{ f.qty | fnum(0) }}</td><td class="num">{{ f.price | fnum }}</td><td class="num">{{ f.value | money(true) }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No fills yet.</td></tr>{% endfor %}
+</table></div>
 {% endblock %}

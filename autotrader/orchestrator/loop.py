@@ -17,8 +17,8 @@ from autotrader.orchestrator.control import PAUSED  # noqa: F401 - re-exported
 from autotrader.orchestrator.runner import run_job, run_opencode
 
 log = logging.getLogger(__name__)
-PRIORITY = case({"auditor": 0, "researcher": 1, "supervisor": 2, "reviewer": 3},
-                value=AgentJob.agent, else_=4)
+PRIORITY = case({"auditor": 0, "options_auditor": 0, "options_researcher": 1, "researcher": 2,
+                 "supervisor": 3, "reviewer": 4}, value=AgentJob.agent, else_=5)
 BUDGET_ALERT = "budget_alert"
 
 
@@ -59,6 +59,11 @@ def tick(sessions: sessionmaker[Session], archive, cfg: AgentsConfig, policy: Po
         lines += pipeline.settle(s, policy, cfg)
         for j in slots.fill_slots(s, policy, cfg, history_counter(archive, cfg), now):
             lines.append(f"queued researcher job for a {j.target['interval']} slot")
+        from autotrader.options import competition as gauntlet
+        from autotrader.options.config import load_gauntlet_config
+
+        for _ in gauntlet.fill_slots(s, load_gauntlet_config()):
+            lines.append("queued options_researcher job for an open gauntlet seat")
         for j in pipeline.schedule_reviews(s, policy, cfg, now):
             lines.append(f"queued weekly review of {j.target['slug']}")
         for j in pipeline.schedule_commentary(s, cfg, now):

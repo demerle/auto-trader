@@ -503,3 +503,8 @@ def risk_sign() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+from autotrader.options.cli import options_app  # noqa: E402
+
+app.add_typer(options_app, name="options")

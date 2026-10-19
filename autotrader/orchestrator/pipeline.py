@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from autotrader.alerts import alert
-from autotrader.db.models import AgentJob, Bot, BotStage, Evaluation, Report, Submission
+from autotrader.db.models import ARENA, AgentJob, Bot, BotStage, Evaluation, Report, Submission
 from autotrader.engine.roster import ensure_strategy_version
 from autotrader.evaluator.policy import Policy
 from autotrader.evaluator.run import clean_json
@@ -75,6 +75,38 @@ def deploy(session: Session, sub: Submission, policy: Policy, cfg: AgentsConfig)
     return bot
 
 
+def deploy_option(session: Session, sub: Submission, cfg: AgentsConfig) -> Bot:
+    """An audited options bot: freeze it into options/generated/ and seat it in the gauntlet."""
+    from autotrader.options import competition, registry as oreg
+    from autotrader.options.config import load_gauntlet_config
+    from autotrader.options.roster import create_option_bot, ensure_option_version
+
+    gcfg = load_gauntlet_config()
+    if hashlib.sha256(sub.source.encode()).hexdigest() != sub.code_sha:
+        raise DeployError("submission source does not match its recorded hash")
+    if problems := lint_source(sub.source):
+        raise DeployError("lint failed: " + "; ".join(problems))
+    path = oreg.GENERATED_DIR / f"{sub.name}_v{sub.version}.py"
+    if path.exists() and path.read_text() != sub.source:
+        raise DeployError(f"{path.name} already exists with different code")
+    path.write_text(sub.source)
+    try:
+        sv = ensure_option_version(session, sub.name, sub.version, author=f"job-{sub.job_id}",
+                                   metrics=clean_json(sub.gate_metrics or {}))
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    bot = create_option_bot(session, sv, gcfg, notes=f"Written by agent job {sub.job_id}. "
+                                                     f"Rationale: {sub.rationale[:1500]}")
+    competition.join_week(session, bot, pd.Timestamp.now(tz="UTC"), gcfg.capital)
+    sub.status, sub.bot_id = "deployed", bot.id
+    if cfg.auto_commit:
+        _git_commit(path, f"Gauntlet bot {sub.name}@{sub.version} (job {sub.job_id})")
+    alert(f"New gauntlet bot {bot.slug}", f"{sub.name}@{sub.version} passed the entry test and the audit; "
+          f"it joins the options gauntlet with ${gcfg.capital:,.0f}.")
+    return bot
+
+
 def _git_commit(path: Path, message: str) -> None:
     repo = path.parent
     try:
@@ -92,11 +124,12 @@ def _git_commit(path: Path, message: str) -> None:
 
 def queue_audits(session: Session) -> list[AgentJob]:
     """One auditor job per gated submission that has none yet."""
-    have = {j.submission_id for j in session.scalars(select(AgentJob).where(AgentJob.agent == "auditor"))}
+    have = {j.submission_id for j in session.scalars(
+        select(AgentJob).where(AgentJob.agent.in_(("auditor", "options_auditor"))))}
     out = []
     for sub in session.scalars(select(Submission).where(Submission.status == "audit_pending")):
         if sub.id not in have:
-            job = AgentJob(agent="auditor", model="", status="queued", submission_id=sub.id,
+            job = AgentJob(agent="options_auditor" if sub.interval == "opt" else "auditor", model="", status="queued", submission_id=sub.id,
                            bot_id=None, target={"submission_id": sub.id},
                            prompt=f"Audit submission {sub.id} ({sub.name}@{sub.version}, {sub.interval}).")
             session.add(job)
@@ -112,7 +145,7 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
         if (job.result or {}).get("settled"):
             continue
         has_sub = session.scalars(select(Submission).where(Submission.job_id == job.id)).first()
-        verdict = (job.agent == "auditor" and session.get(Submission, job.submission_id).audit
+        verdict = (job.agent in ("auditor", "options_auditor") and session.get(Submission, job.submission_id).audit
                    or job.agent == "supervisor" and bool(_commentary(session, job)))
         if not has_sub and not verdict and job.attempts < cfg.max_attempts:
             job.status = "queued"  # retry (on the fallback model)
@@ -134,7 +167,7 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
             if not audit["approve"]:
                 _requeue_after_reject(session, sub)
             continue
-        auditors = session.scalars(select(AgentJob).where(AgentJob.agent == "auditor",
+        auditors = session.scalars(select(AgentJob).where(AgentJob.agent.in_(("auditor", "options_auditor")),
                                                           AgentJob.submission_id == sub.id)).all()
         if auditors and all(j.status == "failed" and (j.result or {}).get("settled") for j in auditors):
             sub.status = "rejected"
@@ -142,6 +175,21 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
             notes.append(f"submission {sub.id}: rejected (audit failed)")
 
     for sub in session.scalars(select(Submission).where(Submission.status == "approved")):
+        if sub.interval == "opt":
+            from autotrader.options.config import load_gauntlet_config
+            from autotrader.options.roster import active_option_bots
+
+            if len(active_option_bots(session)) >= load_gauntlet_config().slots:
+                continue  # waits for a seat (the next cull)
+            try:
+                bot = deploy_option(session, sub, cfg)
+                notes.append(f"seated {sub.name}@{sub.version} in the gauntlet as {bot.slug}")
+            except Exception as exc:  # noqa: BLE001
+                sub.status = "rejected"
+                sub.reasons = list(sub.reasons or []) + [f"deploy failed: {exc}"]
+                log.exception("deploy of options submission %s failed", sub.id)
+                alert(f"Deploy failed: {sub.name}@{sub.version}", str(exc))
+            continue
         challenger = sub.parent_strategy_id is not None
         if challenger and len(active_bots(session)) >= policy.slots:
             continue  # a new version waits for a free slot
@@ -161,6 +209,12 @@ def _requeue_after_reject(session: Session, sub: Submission) -> None:
     if sub.parent_strategy_id is not None:
         return
     findings = (sub.audit or {}).get("findings", "")[:3000]
+    if sub.interval == "opt":
+        session.add(AgentJob(agent="options_researcher", model="", status="queued",
+                             target={"group": "options", "reason": f"the auditor rejected {sub.name}@{sub.version}"},
+                             prompt=("The options auditor rejected the last submission for this seat. Its findings "
+                                     f"(learn from them; do not resubmit the same code):\n{findings}")))
+        return
     reason = f"the auditor rejected {sub.name}@{sub.version}"
     session.add(AgentJob(agent="researcher", model="", status="queued",
                          target={"interval": sub.interval, "reason": reason},
@@ -175,8 +229,8 @@ def schedule_reviews(session: Session, policy: Policy, cfg: AgentsConfig, now: p
         return []
     out = []
     recent = now - pd.Timedelta(days=6)
-    for bot in session.scalars(select(Bot).where(Bot.stage.in_((BotStage.PAPER_PROBATION,
-                                                                BotStage.PAPER_PROVEN)))):
+    for bot in session.scalars(select(Bot).where(Bot.group == ARENA, Bot.stage.in_((BotStage.PAPER_PROBATION,
+                                                                                    BotStage.PAPER_PROVEN)))):
         window = policy.windows.get(bot.strategy.interval)
         created = pd.Timestamp(bot.created_at)
         created = created.tz_localize("UTC") if created.tzinfo is None else created

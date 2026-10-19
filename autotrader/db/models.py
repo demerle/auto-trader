@@ -36,6 +36,10 @@ class BotStage(str, enum.Enum):
     ERADICATED = "eradicated"
 
 
+ARENA = "arena"  # the long-term, statistically judged bots
+OPTIONS = "options"  # the weekly options gauntlet
+
+
 class StrategyVersion(Base):
     __tablename__ = "strategy_versions"
     __table_args__ = (UniqueConstraint("name", "version"),)
@@ -61,6 +65,7 @@ class Bot(Base):
     params: Mapped[dict] = mapped_column(default=dict)
     stage: Mapped[BotStage] = mapped_column(Enum(BotStage), default=BotStage.RESEARCH)
     account: Mapped[str] = mapped_column(String(40), default="paper")
+    group: Mapped[str] = mapped_column(String(16), default=ARENA, server_default=ARENA, index=True)
     starting_capital: Mapped[float] = mapped_column(Float, default=10_000.0)
     capital: Mapped[float] = mapped_column(Float, default=10_000.0)  # current allocation
     live_cap: Mapped[float | None] = mapped_column(Float, nullable=True)  # set only by the user
@@ -84,8 +89,12 @@ class Order(Base):
     broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     account: Mapped[str] = mapped_column(String(40))
     interval: Mapped[str] = mapped_column(String(4))
-    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
     qty: Mapped[float] = mapped_column(Float)  # signed
+    # Options: one order per structure. legs = [{symbol, ratio, filled_qty, filled_avg_price}].
+    legs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    structure: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chase: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     order_type: Mapped[str] = mapped_column(String(12))  # market / limit
     time_in_force: Mapped[str] = mapped_column(String(8))  # opg / day
     limit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -120,9 +129,10 @@ class Fill(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), index=True, nullable=True)
     bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
-    symbol: Mapped[str] = mapped_column(String(16))
-    qty: Mapped[float] = mapped_column(Float)  # signed
-    price: Mapped[float] = mapped_column(Float)
+    symbol: Mapped[str] = mapped_column(String(32))
+    qty: Mapped[float] = mapped_column(Float)  # signed (shares, or option contracts)
+    price: Mapped[float] = mapped_column(Float)  # per share (options: premium per share, x100)
+    structure: Mapped[str | None] = mapped_column(String(64), nullable=True)  # options tag
     fees: Mapped[float] = mapped_column(Float, default=0.0)
     internal: Mapped[bool] = mapped_column(Boolean, default=False)  # crossed between bots
     filled_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -289,3 +299,28 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(40))
     target: Mapped[str] = mapped_column(String(120), default="")
     detail: Mapped[dict] = mapped_column(default=dict)
+
+
+class WeeklyResult(Base):
+    """One options bot's week in the gauntlet: opened Monday, scored and maybe culled Friday."""
+
+    __tablename__ = "weekly_results"
+    __table_args__ = (UniqueConstraint("week", "bot_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    week: Mapped[str] = mapped_column(String(10), index=True)  # Monday's date (ET), e.g. 2026-10-26
+    bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
+    start_equity: Mapped[float] = mapped_column(Float)
+    end_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ret: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trades: Mapped[int] = mapped_column(Integer, default=0)
+    sessions: Mapped[int] = mapped_column(Integer, default=0)  # sessions it traded this week
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running/survived/culled/exempt/busted
+    busted: Mapped[bool] = mapped_column(Boolean, default=False)
+    autopsy: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(default=utcnow)
+    scored_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    bot: Mapped[Bot] = relationship()

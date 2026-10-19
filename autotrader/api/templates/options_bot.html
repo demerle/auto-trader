@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf_field, chip with context %}
+{% from "_gauntlet.html" import trade_table, positions_table with context %}
+{% block title %}{{ bot.slug }}{% endblock %}
+{% block content %}
+<h1>{{ bot.slug }} <span class="muted small">{{ bot.strategy }} · {{ "agent " ~ bot.author if bot.author.startswith("job-") else "seed" }} · {{ chip(bot.stage) }}</span></h1>
+<div class="grid">
+  <div class="card stat"><div class="label">This week</div><div class="value {{ row.ret | sign if row }}">{{ row.ret | pct if row else "-" }}</div>
+    <div class="sub">rank {{ row.rank if row else "-" }} · {{ row.status if row else "out" }}</div></div>
+  <div class="card stat"><div class="label">Equity</div><div class="value">{{ row.equity | money if row else "-" }}</div>
+    <div class="sub">today {{ row.day_pnl | money(true) if row else "-" }}</div></div>
+  <div class="card stat"><div class="label">Closed trades this week</div><div class="value">{{ row.trades if row else "-" }}</div>
+    <div class="sub">open risk {{ row.open_risk | money if row else "-" }}</div></div>
+</div>
+<h2>Thesis</h2>
+<div class="card"><p>{{ bot.thesis }}</p><p class="muted small">{{ bot.description }}</p>
+{% if bot.stage != "eradicated" %}
+<div class="actions">
+  {% if bot.paused_until %}
+  <form method="post" action="/actions/bots/{{ bot.slug }}/unpause">{{ csrf_field() }}<button type="submit">Unpause</button></form>
+  {% else %}
+  <form method="post" action="/actions/bots/{{ bot.slug }}/pause" data-confirm="Pause {{ bot.slug }}? It takes no new risk; open positions are still closed by its exits and the engine's cutoffs.">{{ csrf_field() }}<button type="submit">Pause</button></form>
+  {% endif %}
+</div>{% endif %}
+</div>
+<h2>This week</h2>
+<div class="card">{{ line_chart(chart, percent=true, money=false, time_fmt="%a %H:%M", distinct=true) }}</div>
+<div class="cols">
+  <div><h2>Open positions</h2><div class="card">{{ positions_table(positions) }}</div>
+    {% if row and row.last_plan.at %}<h2>Last tick</h2><div class="card small">
+      <div>{{ row.last_plan.at | when }}{% if row.last_plan.frozen %} · <strong>{{ row.last_plan.frozen }}</strong>{% endif %}</div>
+      {% for p in row.last_plan.placed %}<div>placed: {{ p }}</div>{% endfor %}
+      {% for p in row.last_plan.rejected %}<div class="neg">refused: {{ p }}</div>{% endfor %}
+      {% if not row.last_plan.placed and not row.last_plan.rejected %}<div class="muted">no changes</div>{% endif %}
+    </div>{% endif %}
+  </div>
+  <div><h2>Weeks</h2><div class="card table-wrap"><table>
+    <tr><th>Week</th><th class="num">Rank</th><th class="num">Return</th><th class="num">Trades</th><th>Result</th></tr>
+    {% for w in results %}<tr><td><a href="/options/weeks/{{ w.week }}">{{ w.week }}</a></td><td class="num">{{ w.rank or "-" }}</td>
+      <td class="num {{ w.ret | sign }}">{{ w.ret | pct }}</td><td class="num">{{ w.trades }}</td><td>{{ chip(w.status) }}{% if w.busted %} {{ chip("busted") }}{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No weeks yet.</td></tr>{% endfor %}
+  </table></div></div>
+</div>
+<h2>Trades <a class="small" href="/options/trades?bot={{ bot.slug }}">all →</a></h2>
+{{ trade_table(feed, show_bot=false) }}
+{% if bot.smoke and bot.smoke.weeks %}
+<h2>Entry test (synthetic replay)</h2>
+<div class="card small">Weeks: {% for w in bot.smoke.weeks %}{{ w.week }} {{ w.ret | pct }}{{ ", " if not loop.last }}{% endfor %} · opened {{ bot.smoke.structures_opened }} structures · win rate {{ bot.smoke.win_rate | pct(false) }}
+  <div class="muted">Synthetic chains with pessimistic spreads: behaviour check only, not a forecast.</div></div>
+{% endif %}
+{% if bot.stage == "eradicated" %}<h2>Autopsy</h2><div class="card"><pre>{{ bot.notes }}</pre></div>{% endif %}
+<h2>Code</h2>
+{% if source %}<pre>{{ source }}</pre>{% else %}<p class="muted">Source unavailable.</p>{% endif %}
+{% endblock %}
