@@ -1,0 +1,40 @@
+# Arena rules: how long a bot gets, what kills it, what makes it live-eligible.
+# Paper records are scored on daily, flow-adjusted returns.
+slots: 12                      # max active bots; each eradication opens a slot for research
+base_capital: 10000            # paper capital per bot before allocator tilts
+
+windows:                       # minimum paper record before any performance verdict
+  "1m":  {days: 10, trades: 60}
+  "5m":  {days: 10, trades: 30}
+  "15m": {days: 20, trades: 30}
+  "1h":  {days: 20, trades: 20}
+  "1d":  {days: 40, trades: 10}
+max_window_mult: 3             # still not proven after 3x the window -> eradicated
+
+eradicate:
+  max_drawdown: 0.15           # any time after 5 days
+  min_psr: 0.5                 # at/after the window
+  backtest_z: -2.0             # paper mean return this many std-errors below backtest
+  league_bottom_n: 1           # bottom N by Sharpe ...
+  league_min_size: 4           # ... in a league at least this big ...
+  league_consecutive: 2        # ... this many evaluations in a row, while losing to SPY
+
+promote:                       # flags PAPER_PROVEN; going live still needs the user
+  min_psr: 0.95
+  min_alpha: 0.0
+  min_excess_return: 0.0       # vs SPY over the same days
+  backtest_z: -1.0
+
+gate:                          # walk-forward test a new strategy must pass to get a slot
+  min_oos_sharpe: 0.8
+  min_dsr: 0.9
+  max_drawdown: 0.25
+  min_trades: 50
+  min_excess_sharpe: 0.0       # vs equal-weight buy-and-hold of its own universe
+
+allocator:
+  min_mult: 0.5                # capital multiplier bounds vs base_capital
+  max_mult: 3.0
+  prior_days: 20               # shrink Sharpe toward 0 with this many pseudo-days
+  min_days: 5
+  min_change_pct: 0.02

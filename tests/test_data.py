@@ -77,3 +77,21 @@ def test_archive_backfills_older_history(tmp_path):
     archive.update("AAA", "1d", now=now)
     provider.df = df
     assert len(archive.update("AAA", "1d", start=df.index[0], now=now)) == 40
+
+
+def test_failed_backfill_keeps_existing_data(tmp_path):
+    from returns.result import Failure
+
+    df = make_bars(20, start="2024-01-02")
+    provider = FakeProvider(df)
+    archive = BarArchive(tmp_path, [provider])
+    now = pd.Timestamp("2025-01-01", tz="UTC")
+    archive.update("AAA", "1d", now=now)
+
+    def fail_old(symbol, interval, start=None, end=None):
+        if start is not None and start < df.index[0]:
+            return Failure(ValueError("404: no data before listing"))
+        return Success(df[df.index >= start] if start is not None else df)
+
+    provider.fetch_bars = fail_old
+    assert len(archive.update("AAA", "1d", start=pd.Timestamp("2010-01-01", tz="UTC"), now=now)) == 20

@@ -8,14 +8,13 @@ from sqlalchemy.orm import sessionmaker
 from autotrader.backtest.costs import ZERO_COSTS
 from autotrader.backtest.engine import BacktestConfig, run_backtest
 from autotrader.broker.fake import FakeBroker
-from autotrader.data.calendar import bar_close_time, schedule
+from autotrader.data.calendar import bar_close_time
 from autotrader.db.models import Base, Bot, BotStage, EquitySnapshot, StrategyVersion
 from autotrader.engine.arena import Arena
 from autotrader.risk.limits import RiskLimits
 from autotrader.strategies.builtin.stoch_momentum import StochMomentum
-from tests.conftest import make_bars
 
-SYMS = ("AAA", "BBB", "CCC", "DDD")
+from tests.conftest import SYMS
 LOOSE = RiskLimits(max_position_pct=1.0, min_price=0.0, bot_daily_loss_pct=1.0,
                    account_max_drawdown_pct=1.0)
 
@@ -51,17 +50,6 @@ class FakeArchive:
 
     def load(self, symbol, interval):
         return self.bars[symbol]
-
-
-@pytest.fixture
-def history():
-    days = schedule(pd.Timestamp("2023-01-01", tz="UTC"), pd.Timestamp("2024-06-30", tz="UTC")).index
-    out = {}
-    for i, s in enumerate(SYMS):
-        df = make_bars(len(days), seed=i)
-        df.index = days
-        out[s] = df
-    return out
 
 
 def test_live_engine_matches_backtest(tmp_path, history):

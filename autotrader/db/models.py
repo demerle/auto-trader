@@ -176,3 +176,15 @@ class SystemState(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict] = mapped_column(default=dict)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class CashFlow(Base):
+    """Capital moved into (+) or out of (-) a bot by the allocator."""
+
+    __tablename__ = "cash_flows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(default=utcnow)
+    amount: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(Text, default="")

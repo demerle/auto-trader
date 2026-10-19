@@ -23,3 +23,20 @@ def bars() -> pd.DataFrame:
 @pytest.fixture
 def universe() -> dict[str, pd.DataFrame]:
     return {s: make_bars(seed=i) for i, s in enumerate(["AAA", "BBB", "CCC", "DDD"])}
+
+
+SYMS = ("AAA", "BBB", "CCC", "DDD")
+
+
+@pytest.fixture
+def history() -> dict[str, pd.DataFrame]:
+    """Synthetic daily bars on real NYSE sessions (Jan 2023 - Jun 2024)."""
+    from autotrader.data.calendar import schedule
+
+    days = schedule(pd.Timestamp("2023-01-01", tz="UTC"), pd.Timestamp("2024-06-30", tz="UTC")).index
+    out = {}
+    for i, s in enumerate(SYMS):
+        df = make_bars(len(days), seed=i)
+        df.index = days
+        out[s] = df
+    return out

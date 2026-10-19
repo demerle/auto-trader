@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     bots_file: Path = Path(__file__).parent / "bots.yaml"
     collar_bps: float = 15.0  # marketable-limit collar around the last price
     engine_data_delay_sec: int = 20  # wait after a bar closes before fetching it
-    daily_tick_et: str = "19:05"  # Alpaca accepts OPG orders from 19:00 ET
+    daily_tick_et: str = "19:05"
+    evaluate_et: str = "16:30"  # daily evaluation (and Friday allocation) after the close
+
+    ntfy_url: str | None = None  # e.g. https://ntfy.sh/<your-private-topic>
+    discord_webhook: str | None = None  # Alpaca accepts OPG orders from 19:00 ET
 
     @property
     def bar_dir(self) -> Path:

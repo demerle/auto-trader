@@ -13,6 +13,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from autotrader.alerts import alert
 from autotrader.backtest.costs import CostModel
 from autotrader.broker.base import Broker
 from autotrader.broker.desk import Desk, DeskPlan, Intent, net_intents
@@ -31,6 +32,7 @@ from autotrader.strategies.base import Strategy, make_context
 log = logging.getLogger(__name__)
 
 ACTIVE_STAGES = (BotStage.PAPER_PROBATION, BotStage.PAPER_PROVEN, BotStage.LIVE)
+LIQUIDATE_STAGES = (BotStage.ERADICATED,)
 FEATURE_WINDOW_MULT = 3  # features are computed on 3x lookback so EWMs have converged
 
 
@@ -156,8 +158,9 @@ class Arena:
             .order_by(EquitySnapshot.ts).limit(1)).first()
         if first and equity < first * (1 - self.limits.bot_daily_loss_pct):
             bot.paused_until = (sess.market_close + pd.Timedelta(hours=6)).to_pydatetime()
-            report.notes.append(f"{bot.slug}: daily loss limit hit ({equity / first - 1:.1%}); "
-                                "no new risk until next session")
+            msg = f"daily loss limit hit ({equity / first - 1:.1%}); no new risk until next session"
+            report.notes.append(f"{bot.slug}: {msg}")
+            alert(f"{bot.slug} paused", msg)
             return False
         return True
 
@@ -176,21 +179,23 @@ class Arena:
             if interval != "1d" and not dry_run:
                 self.desk.cancel_working(session, interval)
 
-            bots = session.scalars(
+            all_bots = session.scalars(
                 select(Bot).join(StrategyVersion)
-                .where(StrategyVersion.interval == interval, Bot.stage.in_(ACTIVE_STAGES),
-                       Bot.account == self.broker.account)
+                .where(StrategyVersion.interval == interval, Bot.account == self.broker.account)
                 .order_by(Bot.id)).all()
+            books = {b.id: load_book(session, b) for b in all_bots}
+            bots = [b for b in all_bots if b.stage in ACTIVE_STAGES]
+            # Eradicated bots still holding positions are closed out at their normal cadence.
+            closing = [b for b in all_bots if b.stage in LIQUIDATE_STAGES and books[b.id].qty]
             report.bots = len(bots)
-            if not bots:
+            if not bots and not closing:
                 session.commit()
                 return report
 
             strategies = {b.id: self.load_strategy(b) for b in bots}
-            books = {b.id: load_book(session, b) for b in bots}
             symbols = set().union(*(set(s.symbols) for s in strategies.values()),
-                                  *(set(bk.qty) for bk in books.values()))
-            n_bars = max(s.lookback for s in strategies.values()) * FEATURE_WINDOW_MULT
+                                  *(set(books[b.id].qty) for b in bots + closing))
+            n_bars = max((s.lookback for s in strategies.values()), default=10) * FEATURE_WINDOW_MULT
             bars, good = self._load_bars(symbols, interval, n_bars, now, report)
             prices = {s: float(df["close"].iloc[-1]) for s, df in bars.items()}
             if not good:
@@ -208,6 +213,13 @@ class Arena:
                     continue
                 intents += self._bot_intents(session, bot, strategies[bot.id], book, bars, good,
                                              prices, bar_now, now, report)
+            for bot in closing:
+                working = working_qty(session, bot)
+                for s, q in books[bot.id].qty.items():
+                    remaining = -q - working.get(s, 0.0)
+                    if s in prices and remaining:
+                        intents.append(Intent(bot.id, s, remaining, {"liquidate": bot.stage.value}))
+                report.notes.append(f"{bot.slug}: closing out ({bot.stage.value})")
 
             plan = net_intents(intents, self.broker.positions())
             report.plan = plan
@@ -259,6 +271,7 @@ class Arena:
         tif = "day" if is_open(now) else "opg"
         self.desk.execute(session, plan, "kill", prices, "market", tif)
         report.notes.append(f"KILL SWITCH ON: {reason}")
+        alert("KILL SWITCH ON", f"{reason}. All orders cancelled, flatten orders sent.", priority="urgent")
 
     def _last_price(self, symbol: str) -> float:
         for interval in ("1m", "5m", "1d"):

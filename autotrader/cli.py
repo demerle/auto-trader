@@ -169,6 +169,112 @@ def reconcile_cmd() -> None:
     typer.echo("no drift" if not drift else "\n".join(map(str, drift)))
 
 
+def _sessions():
+    from autotrader.db.session import session_factory
+
+    return session_factory()
+
+
+@app.command()
+def evaluate(dry_run: bool = typer.Option(False, help="Show verdicts without applying them"),
+             allocate: bool = typer.Option(False, help="Also run the weekly capital tilt")) -> None:
+    """Score every paper bot now: keep / eradicate / flag live-eligible."""
+    from autotrader.evaluator.jobs import run_daily
+    from autotrader.evaluator.policy import load_policy
+
+    for line in run_daily(_sessions(), BarArchive(), load_policy(), allocate=allocate,
+                          apply=not dry_run):
+        typer.echo(line)
+
+
+@app.command()
+def league() -> None:
+    """Rank active bots by their paper record."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import Bot
+    from autotrader.evaluator.jobs import spy_daily_returns
+    from autotrader.evaluator.record import build_record
+    from autotrader.evaluator.run import EVALUATED_STAGES
+
+    spy = spy_daily_returns(BarArchive(), pd.Timestamp.now(tz="UTC"))
+    with _sessions()() as session:
+        rows = []
+        for bot in session.scalars(select(Bot).where(Bot.stage.in_(EVALUATED_STAGES))).all():
+            rec = build_record(session, bot, spy)
+            rows.append((rec.metrics.get("sharpe", 0.0), bot, rec))
+    typer.echo(f"{'bot':18} {'stage':16} {'days':>4} {'trades':>6} {'return':>8} {'vsSPY':>8} "
+               f"{'sharpe':>7} {'psr':>5} {'maxDD':>7} {'capital':>9}")
+    for _, bot, rec in sorted(rows, key=lambda r: r[0], reverse=True):
+        m = rec.metrics
+        typer.echo(f"{bot.slug:18} {bot.stage.value:16} {rec.days:4d} {rec.trades:6d} "
+                   f"{m.get('total_return', 0):8.2%} {m.get('excess_return', 0):8.2%} "
+                   f"{m.get('sharpe', 0):7.2f} {m.get('psr', 0):5.2f} {m.get('max_drawdown', 0):7.2%} "
+                   f"{bot.capital:9,.0f}")
+
+
+@app.command()
+def graveyard() -> None:
+    """Eradicated bots and why they died."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import Bot, BotStage
+
+    with _sessions()() as session:
+        for bot in session.scalars(select(Bot).where(Bot.stage == BotStage.ERADICATED)).all():
+            typer.echo(f"{bot.stage_since:%Y-%m-%d} {bot.slug}: {bot.notes}\n")
+
+
+@app.command()
+def allocate(dry_run: bool = typer.Option(True, help="Show moves without applying")) -> None:
+    """Weekly capital tilt toward better bots (normally run by the engine on Fridays)."""
+    from autotrader.evaluator.allocator import apply_allocation, plan_allocation
+    from autotrader.evaluator.policy import load_policy
+
+    policy = load_policy()
+    with _sessions()() as session:
+        moves = plan_allocation(session, policy)
+        if not dry_run:
+            moves = apply_allocation(session, policy, moves)
+            session.commit()
+    for mv in moves:
+        typer.echo(f"{mv.bot.slug:18} ${mv.current:,.0f} -> ${mv.target:,.0f} (shrunk Sharpe {mv.score:+.2f})")
+
+
+@app.command()
+def gate(
+    name: str,
+    years: float = 10.0,
+    grid: str = typer.Option("{}", help="JSON param grid tried in each walk-forward fold"),
+    save: bool = typer.Option(False, help="Store results as the strategy's backtest expectation"),
+    refresh: bool = True,
+) -> None:
+    """Walk-forward gate a strategy must pass to earn a paper slot."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import StrategyVersion
+    from autotrader.evaluator.gate import run_gate
+    from autotrader.evaluator.policy import load_policy
+    from autotrader.evaluator.run import clean_json
+
+    cls = registry.get(name)
+    bars = _load(resolve(cls.universe), cls.interval, years, refresh)
+    res = run_gate(cls, bars, load_policy().gate, json.loads(grid))
+    typer.echo(f"{res.strategy}: {'PASS' if res.passed else 'FAIL'}")
+    for r in res.reasons:
+        typer.echo(f"  - {r}")
+    _print({k: v for k, v in res.metrics.items() if isinstance(v, float)})
+    if save:
+        with _sessions()() as session:
+            sv = session.scalars(select(StrategyVersion).where(
+                StrategyVersion.name == cls.name, StrategyVersion.version == cls.version)).first()
+            if sv is None:
+                raise typer.BadParameter(f"{res.strategy} is not registered (run `bots sync`)")
+            sv.backtest_metrics = clean_json(res.metrics | {"gate_passed": float(res.passed)})
+            session.commit()
+        typer.echo("saved as backtest expectation")
+
+
 @risk_app.command("sign")
 def risk_sign() -> None:
     """Record the hash of config/risk.yaml after a human has reviewed it."""

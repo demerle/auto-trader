@@ -5,7 +5,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from autotrader.db.models import Bot, Fill, OrderAllocation, Order
+from autotrader.db.models import Bot, CashFlow, Fill, Order, OrderAllocation
 from autotrader.broker.base import TERMINAL
 from autotrader.ledger.book import Book
 
@@ -15,6 +15,8 @@ def load_book(session: Session, bot: Bot) -> Book:
     fills = session.scalars(select(Fill).where(Fill.bot_id == bot.id).order_by(Fill.id)).all()
     for f in fills:
         book.fill(f.symbol, f.qty, f.price, f.fees)
+    # Allocator flows only move cash, so their order relative to fills doesn't matter.
+    book.cash += sum(session.scalars(select(CashFlow.amount).where(CashFlow.bot_id == bot.id)).all())
     return book
 
 
