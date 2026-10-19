@@ -1,0 +1,41 @@
+# The agent orchestrator: runs opencode (OpenCode Go models) to research strategies.
+# opencode runs as the unprivileged `agent` user; the orchestrator runs as `appuser`.
+FROM python:3.12-slim
+
+# opencode v2 is a glibc-only binary; take it from Arch's package mirror, pinned.
+ARG OPENCODE_PKG=opencode-2.0.32-1-x86_64.pkg.tar.zst
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl zstd ripgrep git \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL "https://geo.mirror.pkgbuild.com/extra/os/x86_64/${OPENCODE_PKG}" -o /tmp/oc.pkg \
+ && tar -I zstd -xf /tmp/oc.pkg -C / usr/bin/opencode \
+ && rm /tmp/oc.pkg && opencode --version
+
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+
+RUN groupadd agents \
+ && useradd -u 1000 -m -G agents appuser \
+ && useradd -u 1001 -m -G agents -s /usr/sbin/nologin agent \
+ && install -d -o agent -g agents -m 2750 /home/agent/.local /home/agent/.local/share \
+ && chgrp agents /home/agent && chmod 2750 /home/agent \
+ && install -d -o agent -g agents -m 2770 /home/agent/.local/share/opencode \
+ && install -d -o agent -g agents -m 2770 /home/agent/.local/state /home/agent/.cache /home/agent/.config \
+ && mkdir -p /app/data /app/workspace && chown -R appuser:appuser /app \
+ && chmod 755 /app/workspace
+
+WORKDIR /app
+USER appuser
+ENV UV_PROJECT_ENVIRONMENT=/home/appuser/venv \
+    PATH="/home/appuser/venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY --chown=appuser:appuser . .
+RUN uv sync --frozen --no-dev && git config --global user.name "autotrader-agents" \
+ && git config --global user.email "agents@autotrader.local"
+
+# Start as root only to hand appuser the two capabilities it needs to launch opencode
+# as `agent`; see docker/agents-entrypoint.sh.
+USER root
+ENTRYPOINT ["/app/docker/agents-entrypoint.sh"]
+CMD ["autotrader", "orchestrator"]

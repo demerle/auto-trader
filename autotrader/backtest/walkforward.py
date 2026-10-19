@@ -54,7 +54,10 @@ def walk_forward(
     config: BacktestConfig = BacktestConfig(),
     costs: CostModel = CostModel(),
     benchmark_returns: pd.Series | None = None,
+    prior_trial_sharpes: Sequence[float] = (),
 ) -> WalkForwardResult:
+    """`prior_trial_sharpes`: per-period Sharpes of variants tried before this run (e.g. by
+    an agent), so the deflated Sharpe accounts for the whole search, not just this grid."""
     timeline = pd.DatetimeIndex(sorted(set().union(*(df.index for df in bars.values()))))
     combos = [dict(base_params or {}) | c for c in param_grid(grid or {})]
     ppy = PERIODS_PER_YEAR[strategy_cls.interval]
@@ -87,8 +90,9 @@ def walk_forward(
 
     oos = pd.concat(pieces) if pieces else pd.Series(dtype="float64", name="equity")
     realized = [t.realized_pnl for f in folds for t in f.test.trades if t.realized_pnl is not None]
-    n_trials = len(combos)
-    sr_var = float(np.var(trial_sharpes, ddof=1)) if len(trial_sharpes) > 1 else 0.0
+    searched = trial_sharpes + [float(x) for x in prior_trial_sharpes if np.isfinite(x)]
+    n_trials = len(combos) + len(prior_trial_sharpes)
+    sr_var = float(np.var(searched, ddof=1)) if len(searched) > 1 else 0.0
     metrics = compute_metrics(oos, ppy, realized, 0.0, benchmark_returns, n_trials, sr_var) \
         if len(oos) > 1 else {}
     return WalkForwardResult(strategy_cls.name, folds, oos, n_trials, trial_sharpes, metrics)

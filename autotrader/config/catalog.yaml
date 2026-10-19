@@ -1,0 +1,18 @@
+# Known strategy families: a starting map for the researcher, not a to-do list.
+# The researcher must check the roster, graveyard and past submissions before picking one.
+- {family: opening_range_breakout, intervals: [1m, 5m], idea: "Trade the break of the first 15-30 min range with the day's trend; flat by close."}
+- {family: vwap_reversion, intervals: [1m, 5m], idea: "Fade stretched moves away from session VWAP in liquid names; tight time stop."}
+- {family: gap_fade, intervals: [5m, 15m], idea: "Fade moderate opening gaps that lack volume confirmation."}
+- {family: rsi2_mean_reversion, intervals: [15m, 1h, 1d], idea: "Connors RSI(2) dips inside an uptrend; exit on reversion to a short SMA."}
+- {family: bollinger_squeeze, intervals: [15m, 1h], idea: "Low band-width compression followed by an expansion breakout."}
+- {family: intraday_momentum, intervals: [15m, 1h], idea: "The first half-hour return predicts the last half-hour (Gao et al.)."}
+- {family: dual_momentum, intervals: [1d], idea: "Antonacci: absolute + relative momentum across asset-class ETFs, monthly."}
+- {family: cross_sectional_momentum, intervals: [1d], idea: "12-1 month momentum ranking across a broad universe, monthly rebalance."}
+- {family: trend_filter, intervals: [1d], idea: "200-day SMA / Donchian turtle breakouts with ATR-based sizing and exits."}
+- {family: pairs_cointegration, intervals: [1h, 1d], idea: "Z-score of a cointegrated spread (e.g. sector ETF pairs); market neutral."}
+- {family: sector_rotation, intervals: [1d], idea: "Rotate into the strongest sector ETFs by risk-adjusted momentum."}
+- {family: low_volatility, intervals: [1d], idea: "Overweight the lowest-volatility names; the low-vol anomaly."}
+- {family: overnight_return, intervals: [1d], idea: "Hold close-to-open, where most of the equity premium has historically accrued."}
+- {family: turn_of_month, intervals: [1d], idea: "Hold equities over the last and first few trading days of the month."}
+- {family: volatility_regime, intervals: [1d], idea: "Scale exposure by realized-volatility regime (target volatility)."}
+- {family: short_term_reversal, intervals: [1d], idea: "Buy last week's biggest losers among large caps, hold a week."}

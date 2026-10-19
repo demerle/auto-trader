@@ -38,6 +38,9 @@ services:
     container_name: autotrader-api
     ports:
       - "8005:8000"
+    volumes:
+      - bars:/app/data
+      - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -48,13 +51,48 @@ services:
   collector:
     <<: *app
     command: ["autotrader", "collect"]
+    volumes:
+      - bars:/app/data
+      - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro
 
   engine:
     <<: *app
     command: ["autotrader", "engine"]
+    volumes:
+      - bars:/app/data
+      - ./autotrader/strategies/generated:/app/autotrader/strategies/generated:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  # Strategy-research agents. No broker keys and no .env: only the database URL,
+  # the opencode credentials (read-only) and what the orchestrator needs.
+  agents:
+    build:
+      context: .
+      dockerfile: Dockerfile.agents
+    environment:
+      AT_DATABASE_URL: postgresql+psycopg://autotrader:${POSTGRES_PASSWORD:-autotrader}@postgres:5432/autotrader
+      AT_AGENT_DATABASE_URL: postgresql+psycopg://autotrader_agent:${AGENT_DB_PASSWORD:-}@postgres:5432/autotrader
+      AT_DATA_DIR: /app/data
+      AT_WORKSPACE_DIR: /app/workspace
+      AT_AGENT_USER: agent
+      AT_AGENT_HOME: /home/agent
+      AT_OPENCODE_AUTH_FILE: /run/secrets/opencode-auth.json
+      AT_NTFY_URL: ${AT_NTFY_URL:-}
+      AT_DISCORD_WEBHOOK: ${AT_DISCORD_WEBHOOK:-}
+    volumes:
+      - bars:/app/data
+      - ./workspace:/app/workspace
+      - ./autotrader/strategies/generated:/app/autotrader/strategies/generated
+      - ./secrets/opencode-go.json:/run/secrets/opencode-auth.json:ro
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   pgdata:

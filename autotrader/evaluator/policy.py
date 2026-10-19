@@ -32,8 +32,17 @@ class GateRules(BaseModel):
     min_oos_sharpe: float = 0.8
     min_dsr: float = 0.9
     max_drawdown: float = 0.25
-    min_trades: int = 50
+    min_trades: int | dict[str, int] = 50  # flat, or per interval
     min_excess_sharpe: float = 0.0
+    # On the sealed holdout (agent strategies only): the last stretch of history the
+    # agent never saw. Looser than the walk-forward bar, since it is short.
+    holdout_min_sharpe: float = 0.0
+    holdout_min_excess_sharpe: float = -0.25
+
+    def trades_for(self, interval: str) -> int:
+        if isinstance(self.min_trades, int):
+            return self.min_trades
+        return self.min_trades.get(interval, max(self.min_trades.values()))
 
 
 class AllocatorRules(BaseModel):

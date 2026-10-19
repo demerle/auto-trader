@@ -29,8 +29,15 @@ gate:                          # walk-forward test a new strategy must pass to g
   min_oos_sharpe: 0.8
   min_dsr: 0.9
   max_drawdown: 0.25
-  min_trades: 50
+  min_trades:                  # out-of-sample closing trades; slow daily strategies trade less
+    "1d": 25
+    "1h": 40
+    "15m": 50
+    "5m": 50
+    "1m": 50
   min_excess_sharpe: 0.0       # vs equal-weight buy-and-hold of its own universe
+  holdout_min_sharpe: 0.0      # agent strategies: on the sealed holdout they never saw
+  holdout_min_excess_sharpe: -0.25
 
 allocator:
   min_mult: 0.5                # capital multiplier bounds vs base_capital

@@ -6,3 +6,5 @@ secrets/
 data/
 .pytest_cache/
 *.egg-info/
+workspace/
+build/

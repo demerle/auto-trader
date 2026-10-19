@@ -5,6 +5,7 @@ archive) -> quality gate -> each bot's strategy (same context, sizing and Book a
 the backtester) -> risk clamps -> desk netting -> broker.
 """
 
+import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from autotrader.engine.state import ACCOUNT_HWM, KILL_SWITCH, get_state, is_kill
 from autotrader.ledger.book import Book
 from autotrader.ledger.store import load_book, working_qty
 from autotrader.risk.limits import RiskLimits, clamp_targets
+from autotrader.sandbox import SandboxError
 from autotrader.strategies import registry
 from autotrader.strategies.base import Strategy, make_context
 
@@ -70,14 +72,37 @@ class Arena:
     def __init__(self, sessions: sessionmaker[Session], broker: Broker, archive, limits: RiskLimits,
                  costs: CostModel = CostModel(), collar_bps: float = 15.0,
                  strategy_loader=None):
-        self.load_strategy = strategy_loader or (
-            lambda bot: registry.get(bot.strategy.name, bot.strategy.version)(bot.params))
+        self.load_strategy = strategy_loader or self._load_strategy
+        self._sandboxed: dict[tuple, Strategy] = {}  # live workers, reused across ticks
         self.sessions = sessions
         self.broker = broker
         self.archive = archive
         self.limits = limits
         self.desk = Desk(broker, costs)
         self.collar_bps = collar_bps
+
+    def _load_strategy(self, bot: Bot) -> Strategy:
+        cls = registry.get(bot.strategy.name, bot.strategy.version)
+        if not registry.is_sandboxed(cls):
+            return cls(bot.params)
+        if cls.code_sha != bot.strategy.code_sha:
+            raise SandboxError(f"{cls.name}@{cls.version} source changed since it was registered")
+        key = (bot.id, cls.code_sha, json.dumps(bot.params, sort_keys=True))
+        if key not in self._sandboxed:
+            self._sandboxed[key] = cls(bot.params)
+        return self._sandboxed[key]
+
+    def _sandbox_failed(self, bot: Bot, exc: Exception, now: pd.Timestamp, report: TickReport) -> None:
+        """Generated code crashed or hung: no new risk for this bot until the next session."""
+        for key in [k for k in self._sandboxed if k[0] == bot.id]:
+            getattr(self._sandboxed.pop(key), "close", lambda: None)()
+        sess = session_for(now)
+        until = (sess.market_close if sess is not None else now) + pd.Timedelta(hours=18)
+        bot.paused_until = until.to_pydatetime()
+        msg = f"sandboxed strategy failed: {str(exc)[:300]}"
+        report.notes.append(f"{bot.slug}: {msg}")
+        log.error("%s: %s", bot.slug, exc)
+        alert(f"{bot.slug} paused", msg + f"; no new risk until {until:%Y-%m-%d %H:%M}Z")
 
     # ----- data -----
     def _load_bars(self, symbols: set[str], interval: Interval, n_bars: int, now: pd.Timestamp,
@@ -114,10 +139,13 @@ class Arena:
         window = strategy.lookback * FEATURE_WINDOW_MULT
         universe = (set(strategy.symbols) | set(book.qty)) & good
         sym_bars = {s: bars[s].iloc[-window:] for s in universe}
-        feats = {s: f for s, df in sym_bars.items() if (f := strategy.features(df)) is not None}
-        ctx = make_context(strategy, bar_now, sym_bars, feats, book.weights(prices), equity)
         try:
+            feats = {s: f for s, df in sym_bars.items() if (f := strategy.features(df)) is not None}
+            ctx = make_context(strategy, bar_now, sym_bars, feats, book.weights(prices), equity)
             targets = strategy.on_bar(ctx)
+        except SandboxError as exc:
+            self._sandbox_failed(bot, exc, now, report)
+            targets, allow_new = None, False
         except Exception as exc:  # noqa: BLE001 - a broken strategy must not stop the tick
             log.exception("strategy %s failed", strategy.key)
             report.notes.append(f"{bot.slug}: strategy error {exc!r}")
@@ -192,7 +220,15 @@ class Arena:
                 session.commit()
                 return report
 
-            strategies = {b.id: self.load_strategy(b) for b in bots}
+            strategies: dict[int, Strategy] = {}
+            for b in bots:
+                try:
+                    strategies[b.id] = self.load_strategy(b)
+                    strategies[b.id].lookback  # starts a sandbox worker if needed
+                except SandboxError as exc:
+                    strategies.pop(b.id, None)
+                    self._sandbox_failed(b, exc, now, report)
+            bots = [b for b in bots if b.id in strategies]
             symbols = set().union(*(set(s.symbols) for s in strategies.values()),
                                   *(set(books[b.id].qty) for b in bots + closing))
             n_bars = max((s.lookback for s in strategies.values()), default=10) * FEATURE_WINDOW_MULT

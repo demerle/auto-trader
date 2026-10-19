@@ -12,15 +12,18 @@ from autotrader.db.models import Bot, BotStage, StrategyVersion
 from autotrader.strategies import registry
 
 
-def ensure_strategy_version(session: Session, name: str, version: str | None = None) -> StrategyVersion:
+def ensure_strategy_version(session: Session, name: str, version: str | None = None,
+                            author: str = "human", backtest_metrics: dict | None = None
+                            ) -> StrategyVersion:
     cls = registry.get(name, version)
-    source = Path(inspect.getfile(cls)).read_bytes()
+    source = Path(getattr(cls, "source_path", None) or inspect.getfile(cls)).read_bytes()
     sha = hashlib.sha256(source).hexdigest()
     sv = session.scalars(select(StrategyVersion).where(
         StrategyVersion.name == cls.name, StrategyVersion.version == cls.version)).first()
     if sv is None:
         sv = StrategyVersion(name=cls.name, version=cls.version, interval=cls.interval,
-                             module=cls.__module__, code_sha=sha, description=cls.description)
+                             module=cls.__module__, code_sha=sha, description=cls.description,
+                              author=author, backtest_metrics=backtest_metrics or {})
         session.add(sv)
         session.flush()
     elif sv.code_sha != sha:

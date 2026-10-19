@@ -166,6 +166,68 @@ class AgentJob(Base):
     result: Mapped[dict] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # What the job is for: {"interval": "1d", "reason": "..."} or {"submission_id": 3}.
+    target: Mapped[dict] = mapped_column(default=dict)
+    submission_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # auditor jobs
+    session_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)  # actual, from opencode events
+    tokens: Mapped[dict] = mapped_column(default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class Submission(Base):
+    """A strategy an agent wrote and submitted for the gate, the audit and a paper slot."""
+
+    __tablename__ = "submissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("agent_jobs.id"), index=True)
+    parent_strategy_id: Mapped[int | None] = mapped_column(ForeignKey("strategy_versions.id"),
+                                                          nullable=True)
+    name: Mapped[str] = mapped_column(String(80))
+    version: Mapped[str] = mapped_column(String(20))
+    interval: Mapped[str] = mapped_column(String(4))
+    draft_path: Mapped[str] = mapped_column(String(300))
+    code_sha: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(Text)  # frozen copy of what was gated
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    params: Mapped[dict] = mapped_column(default=dict)
+    # submitted -> gate_failed | audit_pending -> rejected | approved -> deployed
+    status: Mapped[str] = mapped_column(String(20), default="submitted")
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    gate_metrics: Mapped[dict] = mapped_column(default=dict)
+    holdout_metrics: Mapped[dict] = mapped_column(default=dict)
+    n_trials: Mapped[int] = mapped_column(Integer, default=1)
+    audit: Mapped[dict] = mapped_column(default=dict)
+    bot_id: Mapped[int | None] = mapped_column(ForeignKey("bots.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class AgentNote(Base):
+    __tablename__ = "agent_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("agent_jobs.id"), nullable=True)
+    bot_id: Mapped[int | None] = mapped_column(ForeignKey("bots.id"), nullable=True)
+    topic: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class ToolCall(Base):
+    """Every MCP tool call an agent makes: audit trail and trial counting."""
+
+    __tablename__ = "tool_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("agent_jobs.id"), index=True)
+    tool: Mapped[str] = mapped_column(String(40))
+    args: Mapped[dict] = mapped_column(default=dict)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    trials: Mapped[int] = mapped_column(Integer, default=0)  # backtests this call ran
+    sharpes: Mapped[list] = mapped_column(JSON, default=list)  # their per-period Sharpes
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    ts: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class SystemState(Base):

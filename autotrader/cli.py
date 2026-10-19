@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 
 import pandas as pd
 import typer
@@ -273,6 +274,203 @@ def gate(
             sv.backtest_metrics = clean_json(res.metrics | {"gate_passed": float(res.passed)})
             session.commit()
         typer.echo("saved as backtest expectation")
+
+
+agents_app = typer.Typer(help="Strategy-research agents (opencode on OpenCode Go).",
+                         no_args_is_help=True)
+app.add_typer(agents_app, name="agents")
+
+
+def _agents_ctx():
+    from autotrader.evaluator.policy import load_policy
+    from autotrader.orchestrator.config import load_agents_config
+
+    return _agent_sessions(), BarArchive(), load_agents_config(), load_policy()
+
+
+def _agent_sessions():
+    return _sessions()
+
+
+@app.command()
+def orchestrator(
+    once: bool = typer.Option(False, help="Run one orchestrator tick (may run one agent job)"),
+    dry_run: bool = typer.Option(False, help="Show what would run; change nothing"),
+) -> None:
+    """Run the agent orchestrator: fill slots, run agent jobs, audit and deploy strategies."""
+    from autotrader.orchestrator.loop import run_forever, tick
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    sessions, archive, cfg, policy = _agents_ctx()
+    if once or dry_run:
+        for line in tick(sessions, archive, cfg, policy, dry_run=dry_run):
+            typer.echo(line)
+        return
+    run_forever(sessions, archive, cfg, policy)
+
+
+@agents_app.command("status")
+def agents_status() -> None:
+    """Slots, budget and the job queue at a glance."""
+    from sqlalchemy import func, select
+
+    from autotrader.db.models import AgentJob
+    from autotrader.orchestrator import budget, slots
+
+    sessions, archive, cfg, policy = _agents_ctx()
+    from autotrader.engine.state import get_state
+    from autotrader.orchestrator.loop import PAUSED
+
+    with sessions() as s:
+        if paused := get_state(s, PAUSED):
+            typer.echo(f"PAUSED: {paused.get('reason')}")
+        active = slots.active_bots(s)
+        typer.echo(f"slots: {len(active)}/{policy.slots} bots, {slots.in_flight(s)} in research, "
+                   f"{slots.open_slots(s, policy)} open")
+        chk = budget.check(s, "researcher", cfg)
+        typer.echo(f"budget: {chk}  (next researcher ~${chk.estimate:.2f})")
+        counts = s.execute(select(AgentJob.agent, AgentJob.status, func.count())
+                           .group_by(AgentJob.agent, AgentJob.status)).all()
+        for agent, status, n in sorted(counts):
+            typer.echo(f"  {agent:10} {status:10} {n}")
+
+
+@agents_app.command("jobs")
+def agents_jobs(limit: int = 20) -> None:
+    """Recent agent jobs."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import AgentJob
+
+    with _agent_sessions()() as s:
+        for j in s.scalars(select(AgentJob).order_by(AgentJob.id.desc()).limit(limit)):
+            when = f"{j.started_at:%m-%d %H:%M}" if j.started_at else "-"
+            err = (j.result or {}).get("error") or ""
+            typer.echo(f"#{j.id:<4} {j.agent:10} {j.status:9} {when:11} {j.model or '-':30} "
+                       f"${j.cost_usd:6.3f}  {json.dumps(j.target)} {err[:80]}")
+
+
+@agents_app.command("submissions")
+def agents_submissions(limit: int = 20) -> None:
+    """Strategies agents submitted, with gate and audit outcomes."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import Submission
+
+    with _agent_sessions()() as s:
+        for x in s.scalars(select(Submission).order_by(Submission.id.desc()).limit(limit)):
+            m = x.gate_metrics or {}
+            typer.echo(f"#{x.id:<4} job {x.job_id:<4} {x.name}@{x.version:3} {x.interval:4} "
+                       f"{x.status:13} OOS Sharpe {m.get('sharpe') or 0:5.2f}  "
+                       f"{'; '.join(x.reasons or [])[:100]}")
+            if x.audit:
+                typer.echo(f"      audit: {'APPROVE' if x.audit.get('approve') else 'REJECT'} "
+                           f"{x.audit.get('findings', '')[:200]}")
+
+
+@agents_app.command("queue")
+def agents_queue(role: str = typer.Argument("researcher"),
+                 interval: str = typer.Option("1d", help="Target interval (researcher)"),
+                 slug: str = typer.Option(None, help="Bot to review (reviewer)"),
+                 note: str = typer.Option("", help="Extra instructions for the agent")) -> None:
+    """Queue a researcher (or reviewer) job by hand."""
+    from autotrader.db.models import AgentJob
+    from autotrader.orchestrator.slots import research_prompt
+
+    with _agent_sessions()() as s:
+        if role == "researcher":
+            job = AgentJob(agent=role, model="", target={"interval": interval, "reason": "queued by hand"},
+                           prompt=research_prompt(interval, "queued by hand", note))
+        elif role == "reviewer" and slug:
+            from sqlalchemy import select
+
+            from autotrader.db.models import Bot
+
+            bot = s.scalars(select(Bot).where(Bot.slug == slug)).one()
+            job = AgentJob(agent=role, model="", bot_id=bot.id, target={"slug": slug},
+                           prompt=f"Review of {slug} requested by hand. {note}")
+        else:
+            raise typer.BadParameter("role must be researcher, or reviewer with --slug")
+        s.add(job)
+        s.commit()
+        typer.echo(f"queued job {job.id}")
+
+
+@agents_app.command("auth-export")
+def agents_auth_export(out: Path = typer.Option(Path("secrets/opencode-go.json"),
+                                                help="Where the agents container reads it from")) -> None:
+    """Export ONLY your OpenCode Go credential for the agents container (run on the host
+    after `opencode auth login`). Other providers' keys are never exported."""
+    import os
+    import subprocess
+
+    raw = subprocess.run(["opencode", "auth", "export"], capture_output=True, text=True, timeout=60,
+                         check=True).stdout
+    keep = [c for c in json.loads(raw) if c.get("integrationID") == "opencode-go"]
+    if not keep:
+        raise typer.BadParameter("no opencode-go credential found; run `opencode auth login` first")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(keep, f)
+    os.chmod(out, 0o600)
+    typer.echo(f"wrote {len(keep)} OpenCode Go credential(s) to {out} (mode 600); "
+               "the agents container picks it up before its next job")
+
+
+@agents_app.command("resume")
+def agents_resume() -> None:
+    """Resume the orchestrator after it paused itself (e.g. an expired OpenCode key)."""
+    from autotrader.db.models import SystemState
+    from autotrader.orchestrator.loop import PAUSED
+
+    with _agent_sessions()() as s:
+        row = s.get(SystemState, PAUSED)
+        if row is None:
+            typer.echo("not paused")
+            return
+        s.delete(row)
+        s.commit()
+    typer.echo("resumed")
+
+
+@agents_app.command("cancel")
+def agents_cancel(job_id: int) -> None:
+    """Cancel a queued job."""
+    from autotrader.db.models import AgentJob
+
+    with _agent_sessions()() as s:
+        job = s.get(AgentJob, job_id)
+        if job is None or job.status != "queued":
+            raise typer.BadParameter("only queued jobs can be cancelled")
+        job.status = "cancelled"
+        s.commit()
+    typer.echo(f"cancelled job {job_id}")
+
+
+@agents_app.command("logs")
+def agents_logs(job_id: int, raw: bool = typer.Option(False, help="Print raw opencode events")) -> None:
+    """What an agent did: its tool calls and its final text."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import AgentJob, ToolCall
+
+    with _agent_sessions()() as s:
+        job = s.get(AgentJob, job_id)
+        calls = s.scalars(select(ToolCall).where(ToolCall.job_id == job_id).order_by(ToolCall.id)).all()
+    typer.echo(f"job {job.id} {job.agent} {job.status} on {job.model}, ${job.cost_usd:.3f}")
+    for c in calls:
+        args = {k: (v if len(str(v)) < 80 else str(v)[:77] + "...") for k, v in c.args.items()}
+        typer.echo(f"  {c.ts:%H:%M:%S} {c.tool:16} {'ok ' if c.ok else 'ERR'} {c.duration_ms:6d}ms {args}")
+    if job.transcript_path and Path(job.transcript_path).exists():
+        text = Path(job.transcript_path).read_text(errors="replace")
+        if raw:
+            typer.echo(text)
+        else:
+            from autotrader.orchestrator.runner import final_text
+
+            typer.echo("\n" + final_text(text.splitlines()))
 
 
 @risk_app.command("sign")

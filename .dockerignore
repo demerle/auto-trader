@@ -1,0 +1,15 @@
+# Secrets never go into images; compose passes .env at runtime.
+.env
+.env.*
+!.env.example
+secrets/
+# Local state and build junk
+.git/
+.venv/
+data/
+workspace/
+build/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/

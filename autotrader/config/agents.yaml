@@ -1,0 +1,40 @@
+# Strategy-research agents (opencode on OpenCode Go). Human-owned: agents cannot edit this.
+
+models:                        # opencode -m values; `opencode models` lists what Go offers
+  researcher: opencode-go/glm-5.3
+  auditor: opencode-go/deepseek-v4-pro   # a different model family from the researcher
+  reviewer: opencode-go/deepseek-v4.1-flash
+fallback_models:               # used when a job failed once on its primary model
+  researcher: opencode-go/kimi-k3
+  auditor: opencode-go/qwen3.8-max
+  reviewer: opencode-go/qwen3.8-flash
+
+budget:                        # the arena's own spend, USD (half of the Go plan caps)
+  five_hours: 6.0
+  week: 15.0
+  month: 30.0
+  go_caps: {five_hours: 12.0, week: 30.0, month: 60.0}
+  go_guard: 0.9                # never push *total* Go usage (incl. yours) past 90% of a cap
+  alert_at: 0.8
+  seed_estimates: {researcher: 1.5, auditor: 0.4, reviewer: 0.1}
+
+timeouts_min: {researcher: 45, auditor: 15, reviewer: 10}
+max_attempts: 2
+concurrency: 1
+
+per_job:
+  backtests: 40                # trials an agent may run (every one counts against its DSR)
+  submissions: 3
+
+research_intervals: ["1d", "1h", "15m", "5m"]
+min_history_sessions: 60       # never research an interval with less archived history
+history_years: {"1d": 12, "1h": 2, "15m": 1, "5m": 1, "1m": 1}
+max_universe: {"1d": 60, "1h": 25, "15m": 20, "5m": 20, "1m": 10}
+holdout_days: {"1d": 365, "1h": 120, "15m": 14, "5m": 14, "1m": 3}   # sealed from agents
+
+review:
+  weekday: 5                   # Saturday
+  min_window_frac: 0.5         # bots with at least half their evaluation window
+
+auto_commit: true              # git-commit deployed strategies (when running in a work tree)
+sandbox_memory_mb: 3072
