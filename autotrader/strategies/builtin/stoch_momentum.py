@@ -71,5 +71,6 @@ class StochMomentum(Strategy):
                 changed = True
         if not changed:
             return None
+        # Held positions keep their current weight; only new entries are sized.
         weight = 1.0 / self.params.max_positions
-        return {s: weight for s in sorted(held)}
+        return {s: ctx.weight(s) or weight for s in sorted(held)}

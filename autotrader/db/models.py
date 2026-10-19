@@ -4,7 +4,8 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
+    MetaData,
+    JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -14,6 +15,13 @@ def utcnow() -> datetime:
 
 
 class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention={
+        "ix": "ix_%(column_0_label)s",
+        "uq": "uq_%(table_name)s_%(column_0_name)s",
+        "ck": "ck_%(table_name)s_%(constraint_name)s",
+        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        "pk": "pk_%(table_name)s",
+    })
     type_annotation_map = {datetime: DateTime(timezone=True), dict: JSON}
 
 
@@ -59,36 +67,64 @@ class Bot(Base):
     stage_since: Mapped[datetime] = mapped_column(default=utcnow)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Share quantities the bot is working towards; retried each tick until filled.
+    target_qty: Mapped[dict] = mapped_column(default=dict)
+    paused_until: Mapped[datetime | None] = mapped_column(nullable=True)
 
     strategy: Mapped[StrategyVersion] = relationship()
 
 
 class Order(Base):
+    """An order sent to the broker by the desk; may be shared by several bots."""
+
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
     client_order_id: Mapped[str] = mapped_column(String(64), unique=True)
     broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     account: Mapped[str] = mapped_column(String(40))
-    symbol: Mapped[str] = mapped_column(String(16))
+    interval: Mapped[str] = mapped_column(String(4))
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
     qty: Mapped[float] = mapped_column(Float)  # signed
+    order_type: Mapped[str] = mapped_column(String(12))  # market / limit
+    time_in_force: Mapped[str] = mapped_column(String(8))  # opg / day
     limit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ref_price: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(24), default="new")
-    reason: Mapped[dict] = mapped_column(default=dict)  # decision inputs, for replay
+    filled_qty: Mapped[float] = mapped_column(Float, default=0.0)  # unsigned, as recorded
+    filled_notional: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    done_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    allocations: Mapped[list["OrderAllocation"]] = relationship(back_populates="order")
+
+
+class OrderAllocation(Base):
+    """A bot's share of a desk order."""
+
+    __tablename__ = "order_allocations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
+    qty: Mapped[float] = mapped_column(Float)  # signed
+    filled_qty: Mapped[float] = mapped_column(Float, default=0.0)  # signed
+    reason: Mapped[dict] = mapped_column(default=dict)  # decision inputs, for replay
+
+    order: Mapped[Order] = relationship(back_populates="allocations")
 
 
 class Fill(Base):
     __tablename__ = "fills"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), index=True, nullable=True)
     bot_id: Mapped[int] = mapped_column(ForeignKey("bots.id"), index=True)
     symbol: Mapped[str] = mapped_column(String(16))
-    qty: Mapped[float] = mapped_column(Float)
+    qty: Mapped[float] = mapped_column(Float)  # signed
     price: Mapped[float] = mapped_column(Float)
     fees: Mapped[float] = mapped_column(Float, default=0.0)
+    internal: Mapped[bool] = mapped_column(Boolean, default=False)  # crossed between bots
     filled_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -130,3 +166,13 @@ class AgentJob(Base):
     result: Mapped[dict] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class SystemState(Base):
+    """Small key/value store: kill switch, account high-water mark, last tick per interval."""
+
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(default=dict)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

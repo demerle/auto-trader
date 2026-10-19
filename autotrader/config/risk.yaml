@@ -1,0 +1,9 @@
+# HUMAN-ONLY risk limits. Agents must never edit this file.
+# After editing, run `autotrader risk sign`; the engine refuses to start on a hash mismatch.
+max_gross: 1.0                 # max sum of |weights| per bot
+max_position_pct: 1.0          # max |position value| per symbol / bot equity (dual_momentum holds 100% of one ETF)
+max_order_notional: 25000      # $ cap per desk order
+min_price: 5.0                 # no new exposure below this price
+allow_short: true
+bot_daily_loss_pct: 0.05       # bot down this much today -> no new orders until next session
+account_max_drawdown_pct: 0.20 # account equity this far below its high-water mark -> kill switch

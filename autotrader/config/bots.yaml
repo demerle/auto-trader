@@ -1,0 +1,19 @@
+# The bot roster. `autotrader bots sync` creates missing bots (it never changes a bot
+# that already exists: a strategy/params change should be a new bot or a new version).
+account: paper
+bots:
+  - slug: stoch-momentum
+    strategy: stoch_momentum
+    capital: 10000
+  - slug: rsi2-etf
+    strategy: rsi2_reversion
+    capital: 10000
+  - slug: dual-momentum
+    strategy: dual_momentum
+    capital: 10000
+  - slug: donchian-megacap
+    strategy: donchian_trend
+    capital: 10000
+  - slug: orb-5m
+    strategy: orb_5m
+    capital: 10000

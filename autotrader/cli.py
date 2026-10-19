@@ -73,7 +73,111 @@ def collect() -> None:
     from autotrader.data.collector import run_forever
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     run_forever()
+
+
+bots_app = typer.Typer(help="Manage the bot roster.", no_args_is_help=True)
+risk_app = typer.Typer(help="Human-only risk config.", no_args_is_help=True)
+app.add_typer(bots_app, name="bots")
+app.add_typer(risk_app, name="risk")
+
+
+def _arena():
+    from autotrader.broker.alpaca import AlpacaBroker
+    from autotrader.config import get_settings
+    from autotrader.db.session import session_factory
+    from autotrader.engine.arena import Arena
+    from autotrader.risk.limits import load_limits
+
+    s = get_settings()
+    return Arena(session_factory(), AlpacaBroker.paper_from_settings(), BarArchive(),
+                 load_limits(s.risk_file), collar_bps=s.collar_bps)
+
+
+@bots_app.command("sync")
+def bots_sync() -> None:
+    """Create bots listed in config/bots.yaml that don't exist yet."""
+    from autotrader.config import get_settings
+    from autotrader.db.session import session_factory
+    from autotrader.engine.roster import sync_roster
+
+    with session_factory()() as session:
+        for line in sync_roster(session, get_settings().bots_file):
+            typer.echo(line)
+        session.commit()
+
+
+@bots_app.command("list")
+def bots_list() -> None:
+    """Show each bot's stage, equity (at last tick) and positions."""
+    from sqlalchemy import select
+
+    from autotrader.db.models import Bot, EquitySnapshot
+    from autotrader.db.session import session_factory
+
+    with session_factory()() as session:
+        for bot in session.scalars(select(Bot).order_by(Bot.id)).all():
+            snap = session.scalars(select(EquitySnapshot).where(EquitySnapshot.bot_id == bot.id)
+                                   .order_by(EquitySnapshot.ts.desc()).limit(1)).first()
+            eq = f"${snap.equity:,.2f}" if snap else "-"
+            pos = {k: v for k, v in (snap.positions if snap else {}).items()}
+            typer.echo(f"{bot.slug:18} {bot.strategy.name}@{bot.strategy.version:3} "
+                       f"{bot.stage.value:16} equity {eq:>12}  {pos}")
+
+
+@app.command()
+def engine(
+    once: str = typer.Option(None, help="Run a single tick for this interval and exit"),
+    dry_run: bool = typer.Option(False, help="With --once: print intended orders, change nothing"),
+) -> None:
+    """Run the trading engine (paper account)."""
+    from autotrader.engine.loop import run_forever
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    arena = _arena()
+    if once:
+        typer.echo(str(arena.tick(once, dry_run=dry_run)))
+        return
+    run_forever(arena)
+
+
+@app.command()
+def kill(reason: str = typer.Option("manual", help="Why")) -> None:
+    """KILL SWITCH: cancel all orders, flatten every bot, stop trading."""
+    typer.echo(str(_arena().kill(reason)))
+
+
+@app.command()
+def unkill() -> None:
+    """Turn the kill switch off so the engine trades again."""
+    _arena().unkill()
+    typer.echo("kill switch off")
+
+
+@app.command("reconcile")
+def reconcile_cmd() -> None:
+    """Compare summed bot ledgers with the broker's positions."""
+    from autotrader.broker.reconcile import reconcile
+
+    arena = _arena()
+    with arena.sessions() as session:
+        arena.desk.sync(session)
+        session.commit()
+        drift = reconcile(session, arena.broker)
+    typer.echo("no drift" if not drift else "\n".join(map(str, drift)))
+
+
+@risk_app.command("sign")
+def risk_sign() -> None:
+    """Record the hash of config/risk.yaml after a human has reviewed it."""
+    from autotrader.config import get_settings
+    from autotrader.risk.limits import load_limits, sign
+
+    path = get_settings().risk_file
+    load_limits(path, verify=False)  # validate before signing
+    typer.echo(f"signed {path}: {sign(path)}")
 
 
 if __name__ == "__main__":

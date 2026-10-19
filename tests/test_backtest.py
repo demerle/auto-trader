@@ -32,9 +32,11 @@ FRAC = BacktestConfig(fractional=True)
 
 def test_buy_and_hold_matches_price_return(bars):
     res = run_backtest(BuyAndHold(), {"AAA": bars}, FRAC, ZERO_COSTS)
-    # Decided at close of bar 0, filled at open of bar 1, held to the end.
-    expected = bars.close.iloc[-1] / bars.open.iloc[1]
-    assert res.equity.iloc[-1] / res.equity.iloc[0] == pytest.approx(expected, rel=1e-9)
+    # Sized at the close of bar 0, filled at the open of bar 1, held to the end.
+    qty = 10_000 / bars.close.iloc[0]
+    expected = 10_000 - qty * bars.open.iloc[1] + qty * bars.close.iloc[-1]
+    assert res.equity.iloc[-1] == pytest.approx(expected, rel=1e-9)
+    assert res.trades[0].qty == pytest.approx(qty)
     assert len(res.trades) == 1
     assert res.trades[0].ts == bars.index[1]
     assert res.trades[0].price == bars.open.iloc[1]

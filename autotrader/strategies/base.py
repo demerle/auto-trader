@@ -84,3 +84,18 @@ class Strategy(ABC):
 
     @abstractmethod
     def on_bar(self, ctx: StrategyContext) -> Targets: ...
+
+
+def make_context(strategy: Strategy, now: pd.Timestamp, bars: Mapping[str, pd.DataFrame],
+                 features: Mapping[str, pd.DataFrame], weights: Mapping[str, float],
+                 equity: float) -> StrategyContext:
+    """Build the context from bars/features already truncated at `now`, keeping the last
+    `strategy.lookback` rows. Used identically by the backtester and the live engine."""
+    n = strategy.lookback
+    return StrategyContext(
+        now=now,
+        bars={s: df.iloc[-n:] for s, df in bars.items() if len(df)},
+        features={s: f.iloc[-n:] for s, f in features.items() if len(f)},
+        weights=dict(weights),
+        equity=equity,
+    )

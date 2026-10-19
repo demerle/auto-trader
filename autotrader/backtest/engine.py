@@ -1,14 +1,15 @@
-"""Event-driven bar replay using the same Strategy.on_bar as live trading.
+"""Event-driven bar replay using the same Strategy.on_bar, sizing and Book as live trading.
 
 Timing model, per bar t of the union timeline:
-  1. targets decided at the close of bar t-1 fill at the *open* of bar t
-     (with adverse slippage and fees);
+  1. orders sized at the close of bar t-1 fill at the *open* of bar t
+     (with adverse slippage and fees); an order for a symbol with no bar at t
+     stays pending until that symbol trades;
   2. positions are marked at the close of bar t;
-  3. the strategy sees bars up to and including t and returns new targets.
+  3. the strategy sees bars up to and including t and returns target weights,
+     which are sized into share quantities at bar t's close (as a live order would be).
 A strategy can therefore never trade on the bar that produced its signal.
 """
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -17,8 +18,10 @@ import pandas as pd
 
 from autotrader.backtest.costs import CostModel
 from autotrader.backtest.metrics import compute_metrics, returns_from_equity
+from autotrader.broker.sizing import clean_targets, order_deltas, target_quantities
 from autotrader.data.intervals import PERIODS_PER_YEAR
-from autotrader.strategies.base import Strategy, StrategyContext
+from autotrader.ledger.book import Book
+from autotrader.strategies.base import Strategy, make_context
 
 
 @dataclass(frozen=True)
@@ -62,50 +65,6 @@ class BacktestResult:
         )
 
 
-class _Book:
-    """Cash, signed positions and average cost, with realized P&L on reductions."""
-
-    def __init__(self, cash: float):
-        self.cash = cash
-        self.qty: dict[str, float] = {}
-        self.avg: dict[str, float] = {}
-
-    def fill(self, symbol: str, qty: float, price: float, fees: float) -> float | None:
-        q = self.qty.get(symbol, 0.0)
-        a = self.avg.get(symbol, 0.0)
-        self.cash -= qty * price + fees
-        realized = None
-        if q == 0 or math.copysign(1, q) == math.copysign(1, qty):
-            new_q = q + qty
-            self.avg[symbol] = (q * a + qty * price) / new_q
-        else:
-            closed = min(abs(qty), abs(q))
-            realized = closed * (price - a) * math.copysign(1, q) - fees
-            new_q = q + qty
-            if new_q != 0 and math.copysign(1, new_q) != math.copysign(1, q):
-                self.avg[symbol] = price  # flipped: remainder opened at this price
-        if abs(new_q) < 1e-9:
-            self.qty.pop(symbol, None)
-            self.avg.pop(symbol, None)
-        else:
-            self.qty[symbol] = new_q
-        return realized
-
-    def equity(self, prices: Mapping[str, float]) -> float:
-        return self.cash + sum(q * prices[s] for s, q in self.qty.items())
-
-
-def _clean_targets(targets: dict[str, float], held: set[str], max_gross: float,
-                   tradable: set[str]) -> dict[str, float]:
-    out = {s: float(w) for s, w in targets.items() if s in tradable and w == w}
-    gross = sum(abs(w) for w in out.values())
-    if gross > max_gross:
-        out = {s: w * max_gross / gross for s, w in out.items()}
-    for s in held:
-        out.setdefault(s, 0.0)
-    return out
-
-
 def run_backtest(
     strategy: Strategy,
     bars: Mapping[str, pd.DataFrame],
@@ -123,26 +82,23 @@ def run_backtest(
         bars = {s: df[df.index <= end] for s, df in bars.items()}
     timeline = pd.DatetimeIndex(sorted(set().union(*(df.index for df in bars.values())))) \
         if bars else pd.DatetimeIndex([], tz="UTC")
-    lookback = strategy.lookback
     ppy = PERIODS_PER_YEAR[strategy.interval]
-
-    # Per symbol: row position for each timeline step (-1 when no bar), and bars-so-far count.
     feats = {s: f for s, df in bars.items() if (f := strategy.features(df)) is not None}
 
+    # Per symbol: row position for each timeline step (-1 when no bar), and bars-so-far count.
     rows: dict[str, np.ndarray] = {}
     counts: dict[str, np.ndarray] = {}
     opens: dict[str, np.ndarray] = {}
     closes: dict[str, np.ndarray] = {}
     for s, df in bars.items():
-        pos = df.index.get_indexer(timeline)
-        rows[s] = pos
+        rows[s] = df.index.get_indexer(timeline)
         counts[s] = np.searchsorted(df.index.values, timeline.values, side="right")
         opens[s] = df["open"].to_numpy()
         closes[s] = df["close"].to_numpy()
 
-    book = _Book(config.initial_cash)
+    book = Book(config.initial_cash)
     last_price: dict[str, float] = {}
-    pending: dict[str, float] = {}
+    pending: dict[str, float] = {}  # symbol -> signed share delta awaiting a fill
     trades: list[Trade] = []
     equity_ts: list[pd.Timestamp] = []
     equity_vals: list[float] = []
@@ -150,32 +106,16 @@ def run_backtest(
     borrow_per_bar = costs.borrow_rate_annual / ppy
 
     for i, ts in enumerate(timeline):
-        live = start is None or ts >= start
         here = {s for s in bars if rows[s][i] >= 0}
 
-        # 1. Fill pending targets at this bar's open.
-        if pending:
-            open_px = {s: opens[s][rows[s][i]] for s in here}
-            marks = {**last_price, **open_px}
-            equity_open = book.equity(marks)
-            orders = []
-            for s, w in list(pending.items()):
-                if s not in here:
-                    continue  # stays pending until the symbol trades
-                del pending[s]
-                px = open_px[s]
-                target = w * equity_open / px
-                if not config.fractional:
-                    target = float(math.trunc(target))
-                delta = target - book.qty.get(s, 0.0)
-                if abs(delta * px) >= config.min_trade_value:
-                    orders.append((s, delta, px))
-            for s, delta, px in sorted(orders, key=lambda o: o[1]):  # sells first
-                fill_px = costs.fill_price(px, delta)
-                fees = costs.fees(delta, fill_px)
-                realized = book.fill(s, delta, fill_px, fees)
-                trades.append(Trade(ts, s, delta, fill_px, fees, realized))
-                traded_notional += abs(delta * fill_px)
+        # 1. Fill pending orders at this bar's open (sells first).
+        for s, delta in sorted(((s, d) for s, d in pending.items() if s in here), key=lambda o: o[1]):
+            del pending[s]
+            fill_px = costs.fill_price(opens[s][rows[s][i]], delta)
+            fees = costs.fees(delta, fill_px)
+            realized = book.fill(s, delta, fill_px, fees)
+            trades.append(Trade(ts, s, delta, fill_px, fees, realized))
+            traded_notional += abs(delta * fill_px)
 
         # 2. Mark to market at the close; accrue borrow on shorts.
         for s in here:
@@ -184,26 +124,23 @@ def run_backtest(
         book.cash -= short_value * borrow_per_bar
         equity = book.equity(last_price)
 
-        if not live:
+        if start is not None and ts < start:
             continue
         equity_ts.append(ts)
         equity_vals.append(equity)
 
-        # 3. Ask the strategy for new targets.
+        # 3. Ask the strategy for targets and size them at this close.
         if equity <= 0:
             break
-        ctx_bars, ctx_feats = {}, {}
-        for s, df in bars.items():
-            k = counts[s][i]
-            if k > 0:
-                ctx_bars[s] = df.iloc[max(0, k - lookback):k]
-                if s in feats:
-                    ctx_feats[s] = feats[s].iloc[max(0, k - lookback):k]
-        weights = {s: q * last_price[s] / equity for s, q in book.qty.items()}
-        targets = strategy.on_bar(StrategyContext(
-            now=ts, bars=ctx_bars, features=ctx_feats, weights=weights, equity=equity))
+        upto = {s: df.iloc[:counts[s][i]] for s, df in bars.items()}
+        ctx = make_context(strategy, ts, upto, {s: f.iloc[:counts[s][i]] for s, f in feats.items()},
+                           book.weights(last_price), equity)
+        targets = strategy.on_bar(ctx)
         if targets is not None:
-            pending = _clean_targets(targets, set(book.qty), config.max_gross, set(bars))
+            tradable = set(last_price)
+            weights = clean_targets(targets, set(book.qty), config.max_gross, tradable)
+            target_qty = target_quantities(weights, equity, last_price, config.fractional)
+            pending = order_deltas(target_qty, book.qty, last_price, config.min_trade_value)
 
     equity_series = pd.Series(equity_vals, index=pd.DatetimeIndex(equity_ts, name="ts"), name="equity")
     avg_equity = float(equity_series.mean()) if len(equity_series) else config.initial_cash

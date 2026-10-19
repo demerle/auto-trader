@@ -18,6 +18,8 @@ services:
       POSTGRES_USER: autotrader
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autotrader}
       POSTGRES_DB: autotrader
+    ports:
+      - "127.0.0.1:5433:5432"  # host CLI access only
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +30,7 @@ services:
 
   migrate:
     <<: *app
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-c", "alembic upgrade head && autotrader bots sync"]
     restart: "no"
 
   api:
@@ -46,6 +48,13 @@ services:
   collector:
     <<: *app
     command: ["autotrader", "collect"]
+
+  engine:
+    <<: *app
+    command: ["autotrader", "engine"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
