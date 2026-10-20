@@ -91,3 +91,21 @@ def test_options_kill_needs_csrf_and_confirmation_and_is_audited(client, db):
     with db() as s:
         actions = [a.action for a in s.scalars(select(AuditLog))]
     assert "options_kill" in actions and "options_unkill" in actions
+
+
+def test_culled_bot_keeps_its_page_history_and_final_record(client, db):
+    from autotrader.db.models import Fill
+
+    week = _seed_gauntlet(db)
+    with db() as s:
+        g0 = s.scalars(select(Bot).where(Bot.slug == "g0")).one()
+        r = s.scalars(select(WeeklyResult).where(WeeklyResult.bot_id == g0.id)).one()
+        r.status, r.rank, r.ret, r.scored_at, r.autopsy = "culled", 3, -0.4, utcnow(), "AUTOPSY: bled premium"
+        g0.stage, g0.notes = BotStage.ERADICATED, r.autopsy
+        s.add(Fill(bot_id=g0.id, symbol="SPY261020C00770000", qty=2, price=1.2, structure="spy-drive"))
+        s.commit()
+    login(client)
+    page = client.get("/options/bots/g0").text
+    assert "Final record" in page and "cuts survived</span>" in page and "AUTOPSY: bled premium" in page
+    assert "spy-drive" in page  # its trades are still listed
+    assert "g0" in client.get("/options/graveyard").text and "g0" in client.get(f"/options/weeks/{week}").text

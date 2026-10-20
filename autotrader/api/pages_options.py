@@ -76,6 +76,10 @@ def bot_page(request: Request, slug: str, _=LOGIN, sessions=Depends(get_sessions
                     "max_dd": r.max_drawdown, "busted": r.busted}
                    for r in s.scalars(select(WeeklyResult).where(WeeklyResult.bot_id == bot.id)
                                       .order_by(WeeklyResult.week.desc()))]
+        from autotrader.options.competition import record_text, track_records
+
+        rec = track_records(s).get(bot.id) or {"survived": 0, "weeks": 0, "wins": 0, "hot": False}
+        final = {"record": rec, "record_text": record_text(rec)}
         lines = ov.equity_lines(s, st["week"])
         chart = [(slug, [(pd.Timestamp(t).isoformat(), v) for t, v in lines.get(slug, [])])]
         try:
@@ -86,10 +90,12 @@ def bot_page(request: Request, slug: str, _=LOGIN, sessions=Depends(get_sessions
         info = {"slug": bot.slug, "strategy": f"{bot.strategy.name}@{bot.strategy.version}",
                 "author": bot.strategy.author, "stage": bot.stage.value, "description": bot.strategy.description,
                 "thesis": thesis, "notes": bot.notes, "paused_until": bot.paused_until,
-                "created": bot.created_at, "smoke": bot.strategy.backtest_metrics}
+                "created": bot.created_at, "smoke": bot.strategy.backtest_metrics,
+                "culled": str(bot.stage_since)[:10] if bot.stage.value == "eradicated" else None}
         feed = ov.trade_feed(s, limit=60, bot_slug=slug)
     positions = [{"tag": t, "what": ov.describe(p["legs"]), **p} for t, p in ((row or {}).get("positions") or {}).items()]
-    return page(request, "options_bot.html", bot=info, row=row, results=results, chart=chart, source=source,
+    return page(request, "options_bot.html", bot=info, row=row, final=final, results=results, chart=chart,
+                source=source,
                 feed=feed, positions=positions, refresh=60, section="gauntlet")
 
 
