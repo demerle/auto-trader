@@ -3,8 +3,10 @@ __pycache__/
 .venv/
 .env
 secrets/
-data/
+/data/
 .pytest_cache/
 *.egg-info/
 workspace/
 build/
+*.dump
+bars.tgz
