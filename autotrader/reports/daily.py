@@ -151,9 +151,10 @@ def _gauntlet(session: Session, now: pd.Timestamp, day_start) -> dict | None:
         cut = " ✂️" if r["rank"] > st["cut_line"] else ""
         lines.append(f"{r['rank']}. **{r['slug']}** {_pct(r['ret'])} this week ({'+' if r['day_pnl'] >= 0 else ''}"
                      f"{_usd(r['day_pnl'])} today), {r['trades']} closed trades, {r['open']} open"
-                     f"{' · ' + r['status'] if r['status'] not in ('active', 'running') else ''}{cut}")
+                     f"{' · ' + r['status'] if r['status'] not in ('active', 'running') else ''}"
+                     f" · {r['record_text']}{cut}")
     data = {"week": st["week"], "standings": [{k: r[k] for k in ("rank", "slug", "ret", "day_pnl", "trades",
-                                                                  "open", "status")} for r in st["rows"]],
+                                                                  "open", "status", "record")} for r in st["rows"]],
             "fills_today": len(feed)}
     return {"lines": lines, "data": data}
 

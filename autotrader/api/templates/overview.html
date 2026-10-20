@@ -20,7 +20,8 @@
     <table>
       {% for r in gauntlet.rows %}
       <tr class="{{ 'cut' if loop.index == gauntlet.cut_line and not loop.last }} {{ 'danger' if loop.index > gauntlet.cut_line }}">
-        <td class="muted">{{ r.rank }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td>
+        <td class="muted">{{ r.rank }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a>
+          <div class="legs {{ 'streak' if r.record.hot }}">{{ r.record_text }}</div></td>
         <td class="num {{ r.ret | sign }}">{{ r.ret | pct }}</td><td class="num small {{ r.day_pnl | sign }}">today {{ r.day_pnl | money(true) }}</td>
         <td class="small">{{ r.open }} open</td></tr>
       {% else %}<tr><td class="muted">No bots in the gauntlet yet.</td></tr>{% endfor %}

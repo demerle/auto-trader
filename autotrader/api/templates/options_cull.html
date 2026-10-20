@@ -4,11 +4,12 @@
 <h1>Scoring preview: week of {{ out.week }}</h1>
 <p class="muted small">What the weekly scoring would do if the week ended now. Nothing is changed. The real scoring runs automatically at {{ cfg.score_et }} ET after the week's last session{% if out.practice %} (this is a practice week: nobody is culled){% endif %}.</p>
 <div class="card table-wrap"><table>
-<tr><th class="num">Rank</th><th>Bot</th><th class="num">Return</th><th class="num">Max DD</th><th class="num">Trades</th><th class="num">Sessions</th><th>Outcome</th></tr>
+<tr><th class="num">Rank</th><th>Bot</th><th>Record after this week</th><th class="num">Return</th><th class="num">Max DD</th><th class="num">Trades</th><th class="num">Sessions</th><th>Outcome</th></tr>
 {% for r in out.standings %}
 <tr class="{{ 'danger' if r.culled }}"><td class="num">{{ r.rank }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td>
+  <td class="small">{{ "out" if r.culled else r.record }}</td>
   <td class="num {{ r.ret | sign }}">{{ r.ret | pct }}</td><td class="num">{{ r.max_dd | pct(false) }}</td><td class="num">{{ r.trades }}</td><td class="num">{{ r.sessions }}</td>
   <td>{% if r.culled %}<span class="chip culled">would be culled</span>{% elif not r.cullable %}<span class="chip exempt">exempt</span>{% else %}<span class="chip survived">survives</span>{% endif %}{% if r.busted %} <span class="chip busted">busted</span>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7" class="muted">No running results this week.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="8" class="muted">No running results this week.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

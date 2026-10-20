@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from autotrader.data.calendar import schedule
 from autotrader.db.models import OPTIONS, Bot, BotStage, EquitySnapshot, Order, WeeklyResult
 from autotrader.engine.state import KILL_SWITCH, account_key, get_state
-from autotrader.options.competition import week_bounds, week_of
+from autotrader.options.competition import record_text, track_records, week_bounds, week_of
 from autotrader.options.config import GauntletConfig, load_gauntlet_config
 from autotrader.options.ledger import load_option_book
 from autotrader.options.occ import parse
@@ -93,6 +93,7 @@ def standings(session: Session, now: pd.Timestamp | None = None, cfg: GauntletCo
     week = week or week_of(now)
     day_start = now.tz_convert("America/New_York").normalize().tz_convert("UTC").to_pydatetime()
     results = {r.bot_id: r for r in session.scalars(select(WeeklyResult).where(WeeklyResult.week == week))}
+    records = track_records(session)
     bots = {b.id: b for b in session.scalars(select(Bot).where(Bot.group == OPTIONS))
             if b.id in results or b.stage in (BotStage.PAPER_PROBATION, BotStage.PAPER_PROVEN)}
     rows = []
@@ -120,6 +121,9 @@ def standings(session: Session, now: pd.Timestamp | None = None, cfg: GauntletCo
                      "positions": positions, "status": status, "busted": bool(r and r.busted),
                      "rank_final": r.rank if r else None, "max_dd": r.max_drawdown if r else None,
                      "sessions": r.sessions if r else 0, "description": bot.strategy.description,
+                     "record": records.get(bot_id) or {"survived": 0, "weeks": 0, "wins": 0, "hot": False,
+                                                       "since": r.week if r else None},
+                     "record_text": record_text(records.get(bot_id)),
                      "last_plan": bot.target_qty if isinstance(bot.target_qty, dict) else {}})
     rows.sort(key=lambda x: (x["rank_final"] is None, x["rank_final"] or 0,
                              -1 if x["busted"] else 0, -x["ret"]))
@@ -207,18 +211,20 @@ def week_detail(session: Session, week: str) -> list[dict]:
 
 
 def all_time(session: Session) -> list[dict]:
-    """Cumulative (compounded) weekly return and weeks survived, per options bot."""
+    """Per options bot: cuts survived (its streak), weeks played, wins, compounded weekly return."""
+    records = track_records(session)
     agg: dict[str, dict] = {}
     for r in session.scalars(select(WeeklyResult).where(WeeklyResult.ret.is_not(None))):
-        a = agg.setdefault(r.bot.slug, {"slug": r.bot.slug, "strategy": r.bot.strategy.name, "weeks": 0,
-                                        "survived": 0, "growth": 1.0, "best": None, "stage": r.bot.stage.value,
-                                        "author": r.bot.strategy.author})
-        a["weeks"] += 1
-        a["survived"] += r.status in ("survived", "exempt")
+        rec = records.get(r.bot_id, {})
+        a = agg.setdefault(r.bot.slug, {"slug": r.bot.slug, "strategy": r.bot.strategy.name, "growth": 1.0,
+                                        "stage": r.bot.stage.value, "author": r.bot.strategy.author,
+                                        "weeks": rec.get("weeks", 0), "survived": rec.get("survived", 0),
+                                        "wins": rec.get("wins", 0), "best": rec.get("best"),
+                                        "since": rec.get("since"), "hot": rec.get("hot", False),
+                                        "record_text": record_text(rec)})
         a["growth"] *= 1 + r.ret
-        a["best"] = r.ret if a["best"] is None else max(a["best"], r.ret)
     rows = [dict(a, cumulative=a["growth"] - 1) for a in agg.values()]
-    return sorted(rows, key=lambda x: -x["cumulative"])
+    return sorted(rows, key=lambda x: (x["stage"] == "eradicated", -x["survived"], -x["cumulative"]))
 
 
 def graveyard(session: Session, limit: int = 50) -> list[dict]:

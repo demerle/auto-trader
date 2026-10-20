@@ -8,11 +8,12 @@
 <h1>Week of {{ st.week }} <span class="muted small">· day {{ st.day }} of {{ st.days }} · scoring {{ st.score_at or "done" }} · bottom {{ st.cull }} culled</span></h1>
 
 <div class="card table-wrap"><table>
-<tr><th>#</th><th>Bot</th><th>Status</th><th class="num">Week</th><th class="num">Equity</th><th class="num">Today</th><th class="num">Closed trades</th><th class="num">Open</th><th class="num">Open risk</th><th>Last tick</th></tr>
+<tr><th>#</th><th>Bot</th><th>Record</th><th>Status</th><th class="num">Week</th><th class="num">Equity</th><th class="num">Today</th><th class="num">Closed trades</th><th class="num">Open</th><th class="num">Open risk</th><th>Last tick</th></tr>
 {% for r in st.rows %}
 <tr class="{{ 'cut' if loop.index == st.cut_line and not loop.last }} {{ 'danger' if loop.index > st.cut_line }}">
   <td class="muted">{{ r.rank }}</td>
   <td><a href="/options/bots/{{ r.slug }}"><strong>{{ r.slug }}</strong></a><div class="legs">{{ r.strategy }}{{ " · agent" if r.author.startswith("job-") else " · seed" }}</div></td>
+  <td class="{{ 'streak' if r.record.hot }}">{{ r.record_text }}{% if r.record.since %}<div class="legs">in since {{ r.record.since }}{% if r.record.weeks %} · {{ r.record.weeks }} week{{ "s" if r.record.weeks != 1 }} played{% endif %}</div>{% endif %}</td>
   <td><span class="chip {{ r.status.split(' ')[0] }}">{{ r.status }}</span></td>
   <td class="num {{ r.ret | sign }}"><strong>{{ r.ret | pct }}</strong></td>
   <td class="num">{{ r.equity | money }}</td>
@@ -22,7 +23,7 @@
   <td class="small">{% if r.last_plan.at %}{{ r.last_plan.at | when }}{% if r.last_plan.frozen %} <span class="chip busted">{{ r.last_plan.frozen }}</span>{% endif %}
     {% if r.last_plan.rejected %}<div class="legs">refused: {{ r.last_plan.rejected[0] | truncate(90) }}</div>{% endif %}{% endif %}</td>
 </tr>
-{% else %}<tr><td colspan="10" class="muted">No bots in the gauntlet yet. Seed it with <code>autotrader options seed</code>.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="11" class="muted">No bots in the gauntlet yet. Seed it with <code>autotrader options seed</code>.</td></tr>{% endfor %}
 </table>
 {% if st.rows %}<p class="small"><span class="cutlabel">— — cut line —</span> <span class="muted">rows below it would be culled if the week ended now (bots with fewer than 3 sessions this week are exempt). <a href="/options/cull-preview">Preview the scoring →</a></span></p>{% endif %}
 </div>

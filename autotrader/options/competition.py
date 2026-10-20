@@ -107,6 +107,39 @@ def mark_busted(session: Session, bot: Bot, now: pd.Timestamp) -> None:
         alert(f"{bot.slug} BUSTED", "Equity fell below the bust line; frozen until the weekly scoring.")
 
 
+HOT_STREAK = 3  # cuts survived in a row before a bot is "on a streak"
+
+
+def track_records(session: Session) -> dict[int, dict]:
+    """Per bot, from its scored weeks: cuts survived (real weeks it was at risk of the cull and
+    stayed in), weeks played, weekly wins, best week, and when it entered. A culled bot never
+    returns, so every cut it survived is part of one unbroken streak."""
+    out: dict[int, dict] = {}
+    for r in session.scalars(select(WeeklyResult).where(WeeklyResult.scored_at.is_not(None))
+                             .order_by(WeeklyResult.week)):
+        rec = out.setdefault(r.bot_id, {"survived": 0, "weeks": 0, "wins": 0, "best": None, "since": r.week,
+                                        "culled": False})
+        rec["weeks"] += 1
+        rec["survived"] += r.status == "survived"
+        rec["wins"] += r.rank == 1
+        rec["culled"] = rec["culled"] or r.status == "culled"
+        if r.ret is not None:
+            rec["best"] = r.ret if rec["best"] is None else max(rec["best"], r.ret)
+    for rec in out.values():
+        rec["hot"] = rec["survived"] >= HOT_STREAK and not rec["culled"]
+    return out
+
+
+def record_text(rec: dict | None) -> str:
+    """'🔥 4 cuts survived · 2 wins' / 'rookie'."""
+    if not rec or not rec.get("weeks"):
+        return "rookie"
+    parts = [f"{'🔥 ' if rec.get('hot') else ''}{rec['survived']} cut{'s' if rec['survived'] != 1 else ''} survived"]
+    if rec.get("wins"):
+        parts.append(f"{rec['wins']} win{'s' if rec['wins'] != 1 else ''}")
+    return " · ".join(parts)
+
+
 def _max_drawdown(session: Session, bot: Bot, since) -> float:
     eq = [s.equity for s in session.scalars(select(EquitySnapshot).where(
         EquitySnapshot.bot_id == bot.id, EquitySnapshot.ts >= since).order_by(EquitySnapshot.ts))]
@@ -218,9 +251,20 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
     cullable = [x for x in rows if x["cullable"]]
     doomed = {x["slug"] for x in cullable[-cfg.cull:]} if not practice and cfg.cull else set()
     market = market_summary(archive, now, pd.Timestamp(week, tz="UTC")) if archive is not None else {}
+    before = track_records(session)
+    for x in rows:
+        rec = dict(before.get(x["bot"].id) or {"survived": 0, "weeks": 0, "wins": 0, "culled": False})
+        rec["weeks"] += 1
+        rec["wins"] += x["rank"] == 1
+        if not practice and x["cullable"] and x["slug"] not in doomed:
+            rec["survived"] += 1
+        rec["hot"] = rec["survived"] >= HOT_STREAK and x["slug"] not in doomed
+        x["record"] = record_text(rec)
+        x["survived"] = rec["survived"]
     summary = {"week": week, "practice": practice, "standings": [
         {k: (round(v, 4) if isinstance(v, float) else v) for k, v in x.items()
-         if k in ("rank", "slug", "ret", "max_dd", "trades", "busted", "cullable", "sessions", "end")}
+         if k in ("rank", "slug", "ret", "max_dd", "trades", "busted", "cullable", "sessions", "end", "record",
+                  "survived")}
         | {"culled": x["slug"] in doomed} for x in rows]}
     if not apply:
         return summary
@@ -241,7 +285,7 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
                                         f"Study its autopsy (get_options_graveyard) and the survivors, then "
                                         f"build a replacement that wins next week.\n\nAutopsy:\n{r.autopsy[:4000]}"))
         else:
-            r.status = "survived" if x["cullable"] else "exempt"
+            r.status = "practice" if practice else ("survived" if x["cullable"] else "exempt")
     set_state(session, WEEK_STATE, dict(state, scored=week))
     session.flush()
     _announce(summary)
@@ -253,7 +297,8 @@ def _announce(summary: dict) -> None:
     for s in summary["standings"]:
         flag = " ❌ CULLED" if s["culled"] else (" (exempt)" if not s["cullable"] else "")
         lines.append(f"{s['rank']}. {s['slug']}: {s['ret']:+.1%} ({s['trades']} trades, max DD "
-                     f"{s['max_dd']:.1%}){' BUSTED' if s['busted'] else ''}{flag}")
+                     f"{s['max_dd']:.1%}){' BUSTED' if s['busted'] else ''}{flag}"
+                     + ("" if s["culled"] else f" · {s['record']}"))
     culled = [s["slug"] for s in summary["standings"] if s["culled"]]
     if culled:
         lines += ["", f"Out: {', '.join(culled)}. Replacements are being researched for Monday."]

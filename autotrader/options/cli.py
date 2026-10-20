@@ -155,7 +155,8 @@ def standings() -> None:
     typer.echo(f"Week of {st['week']} (day {st['day']}/{st['days']}), cut line below rank {st['cut_line']}")
     for r in st["rows"]:
         typer.echo(f"{r['rank']:>2}. {r['slug']:28} {r['ret'] * 100:+7.1f}%  ${r['equity']:>9,.0f}  "
-                   f"today {r['day_pnl']:+9,.0f}  trades {r['trades']:>3}  open {r['open']}  {r['status']}")
+                   f"today {r['day_pnl']:+9,.0f}  trades {r['trades']:>3}  open {r['open']}  {r['status']:13} "
+                   f"{r['record_text']}")
 
 
 @options_app.command("trades")

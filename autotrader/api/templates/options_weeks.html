@@ -10,13 +10,14 @@
   <td>{% for c in w.culled %}<a href="/options/bots/{{ c }}">{{ c }}</a>{{ ", " if not loop.last }}{% else %}<span class="muted">-</span>{% endfor %}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">No weeks yet.</td></tr>{% endfor %}
 </table></div>
-<h2>All-time leaderboard <span class="muted small">(weekly returns compounded; each week starts again from $5,000)</span></h2>
+<h2>Longest in the game <span class="muted small">(cuts survived in a row; 🔥 = {{ 3 }}+ and still in. Cumulative return compounds the weekly returns; every week restarts at $5,000)</span></h2>
 <div class="card table-wrap"><table>
-<tr><th>#</th><th>Bot</th><th>Strategy</th><th class="num">Cumulative</th><th class="num">Best week</th><th class="num">Weeks</th><th class="num">Survived</th><th>Now</th></tr>
+<tr><th>#</th><th>Bot</th><th>Strategy</th><th class="num">Cuts survived</th><th class="num">Weeks played</th><th class="num">Wins</th><th class="num">Cumulative</th><th class="num">Best week</th><th>Since</th><th>Now</th></tr>
 {% for r in alltime %}
 <tr><td class="muted">{{ loop.index }}</td><td><a href="/options/bots/{{ r.slug }}">{{ r.slug }}</a></td><td>{{ r.strategy }}{{ " · agent" if r.author.startswith("job-") }}</td>
+  <td class="num {{ 'streak' if r.hot }}"><strong>{{ "🔥 " if r.hot }}{{ r.survived }}</strong></td><td class="num">{{ r.weeks }}</td><td class="num">{{ r.wins }}</td>
   <td class="num {{ r.cumulative | sign }}">{{ r.cumulative | pct }}</td><td class="num">{{ r.best | pct }}</td>
-  <td class="num">{{ r.weeks }}</td><td class="num">{{ r.survived }}</td><td><span class="chip {{ r.stage }}">{{ "out" if r.stage == "eradicated" else "in" }}</span></td></tr>
-{% else %}<tr><td colspan="8" class="muted">Nothing scored yet.</td></tr>{% endfor %}
+  <td class="small">{{ r.since or "-" }}</td><td><span class="chip {{ r.stage }}">{{ "out" if r.stage == "eradicated" else "in" }}</span></td></tr>
+{% else %}<tr><td colspan="10" class="muted">Nothing scored yet.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

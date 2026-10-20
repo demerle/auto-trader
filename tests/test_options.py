@@ -491,3 +491,36 @@ def test_gauntlet_tick_places_books_and_snapshots(odb, sent_alerts):
         assert len(snaps) == 2 and snaps[-1].positions["atm"]["qty"] == 2
         assert s.scalars(select(Fill)).all()[0].structure == "atm"
     assert "o0" in str(rep2)
+
+
+def test_track_record_counts_cuts_survived_and_streaks(odb, sent_alerts):
+    from autotrader.options.competition import record_text, track_records
+    from autotrader.options.views import all_time, standings
+
+    mondays = ["2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09"]
+    rets = {"o0": 0.5, "o1": 0.4, "o2": 0.3, "o3": 0.2, "o4": 0.1}
+    cfg = CFG.model_copy(update={"cull": 1})
+    with odb() as s:
+        for i, mon in enumerate(mondays):
+            start = et(f"{mon} 09:05")
+            competition.start_week(s, start, cfg)
+            for b in s.scalars(select(Bot).where(Bot.group == OPTIONS, Bot.stage == BotStage.PAPER_PROBATION)):
+                s.add(CashFlow(bot_id=b.id, amount=5000 * rets[b.slug], reason="pnl",
+                               ts=(start + pd.Timedelta(hours=5)).to_pydatetime()))
+                competition.current_result(s, b).sessions = 5
+            s.flush()
+            friday = start + pd.Timedelta(days=4, hours=7, minutes=30)
+            out = competition.score_week(s, friday, cfg, practice=(i == 0))
+            s.flush()
+        recs = {s.get(Bot, k).slug: v for k, v in track_records(s).items()}
+        # week 1 was practice (no cut counts); then o4, o3, o2 were cut in turn (bottom 1 each week)
+        assert recs["o0"]["survived"] == 3 and recs["o0"]["weeks"] == 4 and recs["o0"]["wins"] == 4
+        assert recs["o0"]["hot"] and record_text(recs["o0"]) == "🔥 3 cuts survived · 4 wins"
+        assert recs["o4"]["survived"] == 0 and recs["o4"]["culled"] and not recs["o4"]["hot"]
+        assert recs["o3"]["survived"] == 1 and recs["o2"]["survived"] == 2
+        assert "🔥 3 cuts survived" in [x["record"] for x in out["standings"] if x["slug"] == "o0"][0]
+        board = all_time(s)
+        assert board[0]["slug"] == "o0" and board[0]["survived"] == 3
+        rows = {r["slug"]: r for r in standings(s, et("2026-11-13 17:00"), cfg, week="2026-11-09")["rows"]}
+        assert rows["o1"]["record_text"].startswith("🔥 3 cuts survived")
+    assert any("cuts survived" in str(x) for x in sent_alerts)

@@ -9,6 +9,9 @@
     <div class="sub">rank {{ row.rank if row else "-" }} · {{ row.status if row else "out" }}</div></div>
   <div class="card stat"><div class="label">Equity</div><div class="value">{{ row.equity | money if row else "-" }}</div>
     <div class="sub">today {{ row.day_pnl | money(true) if row else "-" }}</div></div>
+  <div class="card stat {{ 'streak' if row and row.record.hot }}"><div class="label">In the game</div>
+    <div class="value">{{ row.record.survived if row else "-" }} <span class="small">cut{{ "s" if not row or row.record.survived != 1 }} survived</span></div>
+    <div class="sub">{% if row %}{{ "🔥 on a streak · " if row.record.hot }}{{ row.record.weeks }} week{{ "s" if row.record.weeks != 1 }} played · {{ row.record.wins }} win{{ "s" if row.record.wins != 1 }}{% if row.record.since %} · since {{ row.record.since }}{% endif %}{% else %}out{% endif %}</div></div>
   <div class="card stat"><div class="label">Closed trades this week</div><div class="value">{{ row.trades if row else "-" }}</div>
     <div class="sub">open risk {{ row.open_risk | money if row else "-" }}</div></div>
 </div>
