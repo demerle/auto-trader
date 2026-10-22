@@ -1,9 +1,13 @@
 """Synthetic option chains for backtests (no free historical intraday options data exists).
 
-Built from the real underlying price plus VIX / VIX1D. The ATM IV is VIX1D for
-same-day expiries blending into VIX at 30 days, scaled by the underlying's realized
-vol relative to SPY's; skew lifts downside strikes. Spreads are ~1.5-2x real ones
-and fills are at the far side (pessimistic). Good enough to prove a strategy trades and respects the limits; it
+Built from the real underlying price plus VIX / VIX1D, calibrated against real option
+prices (Alpaca 0DTE prints, Feb 2024 - Oct 2026, and CBOE chains): same-day options
+trade at an ATM IV (Black-Scholes, calendar time to the 16:00 close) of about 1.7x
+VIX1D for SPY (QQQ ~2.2x), not 1x; later expiries sit near VIX. Both are scaled by the
+underlying's realized vol relative to SPY's, and a smile lifts both wings (puts more).
+Using VIX1D as-is priced 0DTE options at roughly half their real cost (OTM ones at a
+fifth or less), which made option buyers look far better here than they are live.
+Spreads are ~1.5-2x real ones and fills are at the far side (pessimistic). Good enough to prove a strategy trades and respects the limits; it
 cannot prove a strategy profitable. Real recorded chains replace it where we have them.
 """
 
@@ -36,11 +40,15 @@ def expiries(underlying: str, today: date, max_dte: int = 45, limit: int = 8) ->
     return out[:limit]
 
 
+ZERO_DTE_PER_VIX1D = 1.7  # median real SPY 0DTE ATM IV / VIX1D, 2024-2026 (1.6-1.9 through the day)
+
+
 def atm_vol(dte_years: np.ndarray, vix: float, vix1d: float | None, rel: float) -> np.ndarray:
+    """ATM IV per contract: 0DTE from VIX1D, later expiries from VIX (single names on a damped rel)."""
     v30 = vix / 100
-    v0 = (vix1d / 100) if vix1d else v30
-    w = np.clip(dte_years / (30 / 365), 0, 1)
-    return rel * (v0 * (1 - w) + v30 * w)
+    v0 = ZERO_DTE_PER_VIX1D * (vix1d / 100 if vix1d else v30 * 0.75)
+    same_day = np.asarray(dte_years) < 1 / 365
+    return np.where(same_day, rel * v0, rel ** 0.8 * v30)
 
 
 class SyntheticChains:
@@ -80,7 +88,8 @@ class SyntheticChains:
         is_call = (tpl["right"] == "C").to_numpy()
         atm = atm_vol(t, vix, vix1d, rel_vol)
         z = np.log(k / spot) / (atm * np.sqrt(np.maximum(t, 1 / 365)))
-        iv = np.maximum(atm * (1 - 0.12 * z + 0.03 * z * z), 0.4 * atm)
+        z = np.clip(z, -4, 4)
+        iv = atm * (1 - 0.06 * z + 0.06 * z * z)  # 0DTE smile: ~1.35x ATM 2 sd down, ~1.1x 2 sd up
         mark = np.maximum(bs_price(spot, k, t, iv, is_call), 0.0)
         g = bs_greeks(spot, k, t, iv, is_call)
         # About 1.5-2x the half-spreads measured on real CBOE chains (ETFs ~0.5-1c on cheap
