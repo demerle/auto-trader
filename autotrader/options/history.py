@@ -20,13 +20,16 @@ def _get(archive: BarArchive, symbol: str, interval: str, start: pd.Timestamp, e
 
 
 def load_history(underlyings: tuple[str, ...], start: pd.Timestamp, end: pd.Timestamp,
-                 archive: BarArchive | None = None, refresh: bool = True) -> dict:
-    """5m bars from a few days before `start`, daily bars from a year before, VIX levels."""
+                 archive: BarArchive | None = None, refresh: bool = True,
+                 bar_symbols: tuple[str, ...] = ()) -> dict:
+    """5m bars from a few days before `start` (underlyings and bar_symbols), daily bars from a year before
+    (underlyings), VIX levels."""
     archive = archive or BarArchive()
     need = tuple(dict.fromkeys(("SPY",) + tuple(underlyings)))
     b5_start = start - pd.Timedelta(days=7)
     d_start = start - pd.Timedelta(days=400)
-    bars5m = {u: _get(archive, u, "5m", b5_start, end, refresh) for u in underlyings}
+    bars5m = {u: _get(archive, u, "5m", b5_start, end, refresh)
+              for u in dict.fromkeys(tuple(underlyings) + tuple(bar_symbols))}
     daily = {u: _get(archive, u, "1d", d_start, end, refresh) for u in need}
 
     def level(sym: str) -> pd.Series | None:

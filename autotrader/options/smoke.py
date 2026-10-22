@@ -50,10 +50,10 @@ def simulate_class(cls: type[OptionStrategy], cfg: GauntletConfig, limits: Optio
     from autotrader.options.strategy import decode_targets, encode_targets
 
     strategy = cls(params)
-    history = history or load_history(tuple(cls.underlyings), start, end)
+    history = history or load_history(tuple(cls.underlyings), start, end, bar_symbols=tuple(cls.bar_symbols))
     res = simulate(lambda ctx: decode_targets(encode_targets(strategy.on_tick(ctx))),
                    tuple(cls.underlyings), history["bars5m"], history["daily"], history["vix"],
-                   history["vix1d"], start, end, cfg, limits)
+                   history["vix1d"], start, end, cfg, limits, bar_symbols=tuple(cls.bar_symbols))
     return {"summary": res.summary(), "min_worst_equity": res.min_worst_equity,
             "trades": res.trades[-200:], "errors": res.errors}
 

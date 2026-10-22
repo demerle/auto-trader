@@ -124,6 +124,7 @@ class OptionStrategy(ABC):
     name: ClassVar[str]
     version: ClassVar[str] = "1"
     underlyings: ClassVar[tuple[str, ...]]
+    bar_symbols: ClassVar[tuple[str, ...]] = ()  # builtins only: extra symbols whose 5m bars appear in ctx.bars
     description: ClassVar[str] = ""
     thesis: ClassVar[str] = ""  # why this should make money, in a few sentences
     Params: ClassVar[type[OptionParams]] = OptionParams

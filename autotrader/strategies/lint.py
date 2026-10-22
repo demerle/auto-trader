@@ -11,6 +11,7 @@ ALLOWED_IMPORTS = {
     "datetime", "numpy", "pandas", "pydantic",
     "autotrader.indicators", "autotrader.strategies.base", "autotrader.config.universes",
     "autotrader.options.strategy", "autotrader.options.helpers",
+    "autotrader.options.ml",  # gold_scar's packaged direction model (read-only weights, numpy inference)
 }
 FORBIDDEN_NAMES = {
     "eval", "exec", "compile", "open", "__import__", "globals", "locals", "vars",

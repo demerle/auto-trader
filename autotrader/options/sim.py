@@ -88,8 +88,9 @@ def simulate(on_tick: Callable, underlyings: tuple[str, ...], bars5m: Mapping[st
              daily: Mapping[str, pd.DataFrame], vix: pd.Series | None, vix1d: pd.Series | None,
              start: pd.Timestamp, end: pd.Timestamp, cfg: GauntletConfig, limits: OptionRiskLimits,
              capital: float | None = None, chain_source: Callable | None = None,
-             max_errors: int = 3) -> SimResult:
-    """on_tick(ctx) -> targets. chain_source(underlying, spot, t, vix, vix1d, rel) -> Chain."""
+             max_errors: int = 3, bar_symbols: tuple[str, ...] = ()) -> SimResult:
+    """on_tick(ctx) -> targets. chain_source(underlying, spot, t, vix, vix1d, rel) -> Chain.
+    bar_symbols: extra symbols in bars5m whose bars the strategy reads (no chains, no spot)."""
     capital = capital or cfg.capital
     chain_source = chain_source or (lambda u, spot, t, v, v1, rel: synthetic_chain(u, spot, t, v, v1, rel))
     fee = cfg.execution.fee_per_contract
@@ -127,6 +128,9 @@ def simulate(on_tick: Callable, underlyings: tuple[str, ...], bars5m: Mapping[st
                     continue
                 bars[u] = b.iloc[-400:]
                 spot[u] = float(b["close"].iloc[-1])
+            for sym in bar_symbols:
+                if sym not in bars:
+                    bars[sym] = _asof(bars5m.get(sym), t, STEP).iloc[-400:]
             v, v1 = _level(vix, t), _level(vix1d, t)
             for u, s in spot.items():
                 chains[u] = chain_source(u, s, t, v or 18.0, v1, rel.get(u, 1.0))

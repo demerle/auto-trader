@@ -118,8 +118,12 @@ class Gauntlet:
             log.warning("bars %s %s: %s", symbol, interval, exc)
             return pd.DataFrame()
 
-    def market(self, underlyings, now: pd.Timestamp) -> dict:
+    def market(self, underlyings, now: pd.Timestamp, feeds=()) -> dict:
+        """Bars, spot and VIX levels for the underlyings; `feeds` get 5m bars only (strategies' bar_symbols)."""
         bars, daily, spot = {}, {}, {}
+        for sym in feeds:
+            b5 = self._bars(sym, "5m", 7)
+            bars[sym] = b5[b5.index + pd.Timedelta(minutes=5) <= now] if len(b5) else b5
         for u in underlyings:
             b5 = self._bars(u, "5m", 7)
             b5 = b5[b5.index + pd.Timedelta(minutes=5) <= now] if len(b5) else b5
@@ -176,7 +180,8 @@ class Gauntlet:
             failed = self.refresh_chains(underlyings)
             if failed:
                 report.lines.append(f"chain fetch failed: {failed}")
-            mk = self.market(underlyings, now)
+            feeds = sorted({b for s in strategies.values() for b in s.bar_symbols} - set(underlyings))
+            mk = self.market(underlyings, now, feeds)
             self.spot.update(mk["spot"])
             chains = self.chains_now(mk["spot"], now)
             last = week_last_session(now)
@@ -210,7 +215,8 @@ class Gauntlet:
         if frozen != "busted":
             ctx = build_context(now, {u: c for u, c in chains.items() if u in strategy.underlyings},
                                 {u: s for u, s in mk["spot"].items() if u in strategy.underlyings},
-                                {u: b for u, b in mk["bars"].items() if u in strategy.underlyings},
+                                {u: b for u, b in mk["bars"].items()
+                                 if u in strategy.underlyings or u in strategy.bar_symbols},
                                 {u: d for u, d in mk["daily"].items() if u in strategy.underlyings},
                                 mk["vix"], mk["vix1d"], book, marks, week_start_eq,
                                 sess.market_open, sess.market_close, last)
