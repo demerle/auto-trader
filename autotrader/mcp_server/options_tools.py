@@ -73,7 +73,7 @@ Allowed imports: {sorted(lint.ALLOWED_IMPORTS)}. No I/O. Your code runs in a san
 answer within 5 seconds. It is called every {cfg.tick_minutes} minutes from {cfg.first_tick_et} ET.
 
 ## The competition
-- 5 bots, ${cfg.capital:,.0f} each, reset to ${cfg.capital:,.0f} every Monday. After the week's last session the
+- {cfg.slots} bots, ${cfg.capital:,.0f} each, reset to ${cfg.capital:,.0f} every Monday. After the week's last session the
   week's return is ranked; the bottom {cfg.cull} are culled and replaced by new research (you).
 - Only the week's return counts. Think big asymmetric payoffs with capped losses; a bot that
   quietly makes 0.5% a week will be culled by one that makes 40%.

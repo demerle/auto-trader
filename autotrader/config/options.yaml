@@ -1,7 +1,7 @@
-# The options gauntlet: 5 bots, $5k each, reset every Monday; bottom 2 culled every Friday.
+# The options gauntlet: 6 bots, $5k each, reset every Monday; bottom 2 culled every Friday.
 # Hard risk limits live in risk.yaml (options:), which only the user edits.
 account: paper-options
-slots: 5
+slots: 6
 capital: 5000
 cull: 2                     # bottom N by week return are eradicated after the last session of the week
 min_sessions_to_cull: 3     # a bot that joined later in the week is exempt (unless it busted)

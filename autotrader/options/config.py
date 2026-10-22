@@ -31,7 +31,7 @@ class GauntletConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     account: str = "paper-options"
-    slots: int = 5
+    slots: int = 6
     capital: float = 5000.0
     cull: int = 2
     min_sessions_to_cull: int = 3
