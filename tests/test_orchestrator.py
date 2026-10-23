@@ -304,3 +304,17 @@ def test_parse_events_reads_the_exhausted_go_limit():
         "type": "provider.quota", "message": "Go usage limit exceeded", "status": 429, "response": {"body": body}}})]
     res = parse_events(lines)
     assert res.error_type == "provider.quota" and res.quota_window == "weekly"
+
+
+def test_budget_alert_at_most_weekly(arena, monkeypatch):
+    sessions, archive, cfg, policy, _ = arena
+    alerts = []
+    monkeypatch.setattr(loop, "alert", lambda title, msg, **kw: alerts.append(title))
+    with sessions() as s:
+        s.add(AgentJob(agent="researcher", model="m", prompt="x", status="succeeded", cost_usd=cfg.budget.week,
+                       started_at=(NOW - pd.Timedelta(days=1)).to_pydatetime()))
+        s.commit()
+    loop._HISTORY.clear()
+    for d in (0, 1, 3):
+        loop.tick(sessions, archive, cfg, policy, runner=fake_opencode(), now=NOW + pd.Timedelta(days=d))
+    assert alerts == ["Agent budget nearly used"]

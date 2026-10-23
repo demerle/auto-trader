@@ -131,10 +131,13 @@ def _hold_for_quota(session: Session, job: AgentJob, cfg: AgentsConfig, now: pd.
 
 
 def _budget_alert(session: Session, chk: budget.BudgetCheck, cfg: AgentsConfig, now: pd.Timestamp) -> None:
+    """At most one alert a week: jobs simply wait while the budget is used up."""
     hot = budget.near_limit(chk, cfg)
     state = get_state(session, BUDGET_ALERT)
-    if hot and state.get("day") != str(now.date()):
-        alert("Agent budget nearly used", f"{chk} (limits are the arena's share of the Go caps)")
+    last = pd.Timestamp(state["day"]).tz_localize("UTC") if state.get("day") else None
+    if hot and (last is None or now - last >= pd.Timedelta(days=7)):
+        alert("Agent budget nearly used", f"{chk} (the agents' share of the Go caps). Jobs wait until it "
+              "frees up; no more budget alerts this week.")
         set_state(session, BUDGET_ALERT, {"day": str(now.date())})
 
 
