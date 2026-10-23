@@ -46,6 +46,15 @@ def choose_interval(session: Session, cfg: AgentsConfig, history_sessions) -> st
     return min(eligible, key=lambda iv: (counts[iv], cfg.research_intervals.index(iv)))
 
 
+def recently_failed(session: Session, agent: str, cfg: AgentsConfig, now: pd.Timestamp | None = None) -> bool:
+    """A job of this role failed for good within the refill cooldown: don't queue another one yet."""
+    now = now or pd.Timestamp.now(tz="UTC")
+    since = (now - pd.Timedelta(hours=cfg.refill_cooldown_hours)).to_pydatetime()
+    jobs = session.scalars(select(AgentJob).where(AgentJob.agent == agent, AgentJob.status == "failed",
+                                                  AgentJob.finished_at >= since)).all()
+    return any((j.result or {}).get("settled") for j in jobs)
+
+
 def research_prompt(interval: str, reason: str, extra: str = "") -> str:
     text = (f"A slot is open in the arena. Research, write, test and submit one new {interval} "
             f"strategy.\nWhy this slot is open: {reason}\n")
@@ -67,7 +76,7 @@ def fill_slots(session: Session, policy: Policy, cfg: AgentsConfig, history_sess
             job.target = {"interval": iv, "reason": "replace an eradicated bot"}
     queued = session.scalars(select(AgentJob).where(AgentJob.agent == "researcher",
                                                     AgentJob.status == "queued")).first()
-    if queued is None and open_slots(session, policy) > 0:
+    if queued is None and open_slots(session, policy) > 0 and not recently_failed(session, "researcher", cfg, now):
         iv = choose_interval(session, cfg, history_sessions)
         if iv is not None:
             reason = f"the arena has {policy.slots} slots and only {len(active_bots(session))} bots"

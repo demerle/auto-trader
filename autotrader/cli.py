@@ -345,10 +345,13 @@ def agents_status() -> None:
         o = agents_overview(s, cfg, policy)
     if o["paused"]:
         typer.echo(f"PAUSED: {o['paused'].get('reason')}")
+    if hold := o["quota_hold"]:
+        typer.echo(f"WAITING FOR GO QUOTA ({hold.get('window')} limit) until {hold.get('until')}")
     sl = o["slots"]
     typer.echo(f"model: {o['model']}")
     typer.echo(f"slots: {sl['bots']}/{sl['total']} bots, {sl['in_flight']} in research, {sl['open']} open")
-    typer.echo(f"budget: {o['budget']['text']}  (next researcher ~${o['budget']['estimate']:.2f})")
+    typer.echo(f"budget: {o['budget']['text']}, {o['jobs_today']}/{cfg.budget.max_jobs_per_day} jobs in 24h  "
+               f"(next researcher ~${o['budget']['estimate']:.2f})")
     for c in o["counts"]:
         typer.echo(f"  {c['agent']:10} {c['status']:10} {c['n']}")
 

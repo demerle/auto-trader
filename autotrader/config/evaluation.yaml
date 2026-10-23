@@ -1,6 +1,6 @@
 # Arena rules: how long a bot gets, what kills it, what makes it live-eligible.
 # Paper records are scored on daily, flow-adjusted returns.
-slots: 12                      # max active bots; each eradication opens a slot for research
+slots: 6                       # active bots (today's count): research only runs to replace an eradicated bot
 base_capital: 10000            # paper capital per bot before allocator tilts
 
 windows:                       # minimum paper record before any performance verdict

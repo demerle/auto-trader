@@ -87,6 +87,17 @@ class RunResult:
     session_id: str | None = None
     error: str | None = None
     error_type: str | None = None
+    quota_window: str | None = None  # which Go limit ran out ("weekly", ...), on provider.quota errors
+
+
+def _limit_name(err: dict) -> str | None:
+    body = (err.get("response") or {}).get("body") if isinstance(err.get("response"), dict) else None
+    try:
+        meta = json.loads(body).get("metadata") or {} if isinstance(body, str) else {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    name = meta.get("limitName") if isinstance(meta, dict) else None
+    return str(name) if name else None
 
 
 def parse_events(lines) -> RunResult:
@@ -97,7 +108,7 @@ def parse_events(lines) -> RunResult:
     """
     by_id: dict[str, tuple[float, dict]] = {}
     anon: list[tuple[float, dict]] = []
-    session_id, error, error_type = None, None, None
+    session_id, error, error_type, quota_window = None, None, None, None
 
     def visit(obj) -> None:
         if isinstance(obj, dict):
@@ -129,6 +140,8 @@ def parse_events(lines) -> RunResult:
             err = ev.get("error") or {}
             error = err.get("message") if isinstance(err, dict) else str(err)
             error_type = err.get("type") if isinstance(err, dict) else None
+            if error_type == "provider.quota":
+                quota_window = _limit_name(err)
         visit(ev)
     entries = list(by_id.values()) + anon
     tokens: dict[str, float] = {}
@@ -140,7 +153,7 @@ def parse_events(lines) -> RunResult:
                 for k2, v2 in v.items():
                     if isinstance(v2, (int, float)):
                         tokens[f"{k}_{k2}"] = tokens.get(f"{k}_{k2}", 0) + v2
-    return RunResult(None, False, sum(c for c, _ in entries), tokens, session_id, error, error_type)
+    return RunResult(None, False, sum(c for c, _ in entries), tokens, session_id, error, error_type, quota_window)
 
 
 def session_cost(session_id: str, home: Path, xdg_config: Path) -> tuple[float, dict] | None:
@@ -309,6 +322,8 @@ def run_job(sessions: sessionmaker[Session], job_id: int, archive, cfg: AgentsCo
         ok = res.exit_code == 0 and not res.timed_out and not res.error
         job.result = {"exit_code": res.exit_code, "timed_out": res.timed_out, "error": res.error,
                       "error_type": res.error_type, "attempt": job.attempts}
+        if res.quota_window:
+            job.result["quota_window"] = res.quota_window
         job.status = "succeeded" if ok else "failed"
         s.commit()
         return job

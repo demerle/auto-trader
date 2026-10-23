@@ -6,12 +6,12 @@
 # the orchestrator picks it up on its next job, no rebuild needed.
 model: opencode-go/glm-5.3-flash
 
-budget:                        # the arena's own spend, USD (half of the Go plan caps)
-  five_hours: 6.0
-  week: 15.0
-  month: 30.0
-  go_caps: {five_hours: 12.0, week: 30.0, month: 60.0}
-  go_guard: 0.9                # never push *total* Go usage (incl. yours) past 90% of a cap
+budget:                        # the agents' own spend, USD (about a quarter of the Go plan caps of $12/$30/$60)
+  five_hours: 3.0
+  week: 7.0
+  month: 15.0
+  max_jobs_per_day: 4          # jobs started in any 24 hours: opencode's reported cost undercounts Go usage
+  quota_retry_hours: {weekly: 6, monthly: 24, default: 1}  # Go said "usage limit exceeded": wait, then probe
   alert_at: 0.8
   seed_estimates: {researcher: 1.5, auditor: 0.4, reviewer: 0.1, supervisor: 0.02,
                    options_researcher: 1.5, options_auditor: 0.4}
@@ -20,6 +20,7 @@ timeouts_min: {researcher: 45, auditor: 15, reviewer: 10, supervisor: 5,
                options_researcher: 45, options_auditor: 15}
 max_attempts: 2
 concurrency: 1
+refill_cooldown_hours: 6       # after research for an open slot or seat fails for good, wait before trying again
 
 per_job:
   backtests: 40                # trials an agent may run (every one counts against its DSR)

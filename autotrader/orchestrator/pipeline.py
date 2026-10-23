@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from autotrader.alerts import alert
 from autotrader.db.models import ARENA, AgentJob, Bot, BotStage, Evaluation, Report, Submission
 from autotrader.engine.roster import ensure_strategy_version
+from autotrader.engine.state import get_state, set_state
 from autotrader.evaluator.policy import Policy
 from autotrader.evaluator.run import clean_json
 from autotrader.orchestrator.config import AgentsConfig
@@ -138,6 +139,23 @@ def queue_audits(session: Session) -> list[AgentJob]:
     return out
 
 
+FAILURE_ALERTS = "agent_failure_alerts"
+
+
+def _failure_alert(session: Session, job: AgentJob) -> None:
+    """Alert on a failed job once per kind of failure per day; repeats are only logged."""
+    error = (job.result or {}).get("error")
+    key = str((job.result or {}).get("error_type") or error)[:120]
+    today = str(pd.Timestamp.now(tz="UTC").date())
+    state = get_state(session, FAILURE_ALERTS)
+    seen = state.get("seen", []) if state.get("day") == today else []
+    if key in seen:
+        log.info("job %s (%s) failed again: %s (already alerted today)", job.id, job.agent, error)
+        return
+    set_state(session, FAILURE_ALERTS, {"day": today, "seen": seen + [key]})
+    alert(f"Agent job {job.id} failed", f"{job.agent}: {error}\nMore failures like this today are only logged.")
+
+
 def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
     """Act on finished jobs and resolved audits. Idempotent; run every loop."""
     notes: list[str] = []
@@ -153,7 +171,7 @@ def settle(session: Session, policy: Policy, cfg: AgentsConfig) -> list[str]:
         else:
             job.result = dict(job.result or {}) | {"settled": True}
             if not has_sub and not verdict:
-                alert(f"Agent job {job.id} failed", f"{job.agent}: {(job.result or {}).get('error')}")
+                _failure_alert(session, job)
                 notes.append(f"job {job.id} ({job.agent}) failed for good")
 
     queue_audits(session)

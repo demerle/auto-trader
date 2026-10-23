@@ -13,7 +13,7 @@ from autotrader.engine.state import get_state, set_state
 from autotrader.evaluator.policy import Policy
 from autotrader.orchestrator import budget, pipeline, slots
 from autotrader.orchestrator.config import AgentsConfig, load_agents_config
-from autotrader.orchestrator.control import PAUSED  # noqa: F401 - re-exported
+from autotrader.orchestrator.control import PAUSED, QUOTA_HOLD  # noqa: F401 - re-exported
 from autotrader.orchestrator.runner import run_job, run_opencode
 
 log = logging.getLogger(__name__)
@@ -56,14 +56,18 @@ def tick(sessions: sessionmaker[Session], archive, cfg: AgentsConfig, policy: Po
     with sessions() as s:
         if paused := get_state(s, PAUSED):
             return [f"paused: {paused.get('reason')} (resume with `autotrader agents resume`)"]
+        hold = get_state(s, QUOTA_HOLD)
+        if hold.get("until") and now < pd.Timestamp(hold["until"]):
+            return [f"waiting for Go quota ({hold.get('window')} limit) until {hold['until']}"]
         lines += pipeline.settle(s, policy, cfg)
         for j in slots.fill_slots(s, policy, cfg, history_counter(archive, cfg), now):
             lines.append(f"queued researcher job for a {j.target['interval']} slot")
         from autotrader.options import competition as gauntlet
         from autotrader.options.config import load_gauntlet_config
 
-        for _ in gauntlet.fill_slots(s, load_gauntlet_config()):
-            lines.append("queued options_researcher job for an open gauntlet seat")
+        if not slots.recently_failed(s, gauntlet.RESEARCHER, cfg, now):
+            for _ in gauntlet.fill_slots(s, load_gauntlet_config()):
+                lines.append("queued options_researcher job for an open gauntlet seat")
         for j in pipeline.schedule_reviews(s, policy, cfg, now):
             lines.append(f"queued weekly review of {j.target['slug']}")
         for j in pipeline.schedule_commentary(s, cfg, now):
@@ -95,9 +99,35 @@ def tick(sessions: sessionmaker[Session], archive, cfg: AgentsConfig, policy: Po
                   priority="high")
             s.commit()
             return lines + [f"paused: {reason}"]
+        if str((job.result or {}).get("error_type") or "") == "provider.quota":
+            lines.append(_hold_for_quota(s, s.get(AgentJob, job.id), cfg, now))
+            s.commit()
+            return lines
+        if get_state(s, QUOTA_HOLD):  # a job got through: the quota is back
+            set_state(s, QUOTA_HOLD, {})
+            alert("Agents running again", "Go usage is available again; agent jobs have resumed.")
         lines += pipeline.settle(s, policy, cfg)
         s.commit()
     return lines
+
+
+def _hold_for_quota(session: Session, job: AgentJob, cfg: AgentsConfig, now: pd.Timestamp) -> str:
+    """Go's usage limit is used up. Not the job's fault: put it back untouched, hold every job until the
+    limit can have reset, then let one through as a probe. One alert per episode, not per job."""
+    job.status, job.attempts = "queued", max(job.attempts - 1, 0)
+    job.started_at = job.finished_at = None  # a refused job does not count against the daily job cap
+    window = (job.result or {}).get("quota_window") or "default"
+    retry = cfg.budget.quota_retry_hours
+    hours = float(retry.get(window, retry.get("default", 1.0)))
+    until = now + pd.Timedelta(hours=hours)
+    prev = get_state(session, QUOTA_HOLD)
+    set_state(session, QUOTA_HOLD, {"until": until.isoformat(), "window": window,
+                                    "since": prev.get("since") or now.isoformat()})
+    if not prev.get("since"):
+        alert("Agents waiting for Go quota",
+              f"Go's {window} usage limit is used up, so agent jobs are on hold. One job will try again every "
+              f"{hours:g}h; you'll hear once more when they're running again.")
+    return f"Go {window} usage limit reached; holding agent jobs until {until:%Y-%m-%d %H:%M}Z"
 
 
 def _budget_alert(session: Session, chk: budget.BudgetCheck, cfg: AgentsConfig, now: pd.Timestamp) -> None:

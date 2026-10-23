@@ -230,3 +230,77 @@ def test_unknown_model_keys_are_rejected():
     with pytest.raises(ValidationError):
         AgentsConfig.model_validate({"model": "opencode-go/glm-5.3-flash",
                                      "models": {"researcher": "opencode-go/kimi-k3"}})
+
+
+def quota_runner(window="weekly"):
+    def run(job, model, workspace, mcp_url, timeout, log_path):
+        log_path.write_text("")
+        return RunResult(1, False, error="Go usage limit exceeded", error_type="provider.quota",
+                         quota_window=window)
+    return run
+
+
+def test_quota_error_holds_all_jobs_and_alerts_once(arena, monkeypatch):
+    sessions, archive, cfg, policy, _ = arena
+    alerts = []
+    monkeypatch.setattr(loop, "alert", lambda title, msg, **kw: alerts.append(title))
+    loop._HISTORY.clear()
+    out = loop.tick(sessions, archive, cfg, policy, runner=quota_runner(), now=NOW)
+    assert any("holding agent jobs" in line for line in out)
+    with sessions() as s:
+        job = s.scalars(select(AgentJob)).one()
+        assert job.status == "queued" and job.attempts == 0 and job.started_at is None  # not the job's fault
+    assert loop.tick(sessions, archive, cfg, policy, runner=quota_runner(), now=NOW + pd.Timedelta(hours=1))[0] \
+        .startswith("waiting for Go quota (weekly limit)")
+    later = NOW + pd.Timedelta(hours=cfg.budget.quota_retry_hours["weekly"] + 0.1)
+    loop.tick(sessions, archive, cfg, policy, runner=quota_runner(), now=later)  # probe: still out
+    assert alerts == ["Agents waiting for Go quota"]
+    out = loop.tick(sessions, archive, cfg, policy, runner=fake_opencode(),
+                    now=later + pd.Timedelta(hours=cfg.budget.quota_retry_hours["weekly"] + 0.1))
+    assert alerts == ["Agents waiting for Go quota", "Agents running again"]
+    with sessions() as s:
+        assert s.scalars(select(AgentJob).where(AgentJob.agent == "researcher")).one().status == "succeeded"
+
+
+def test_daily_job_cap_blocks_jobs(arena):
+    sessions, archive, cfg, policy, _ = arena
+    with sessions() as s:
+        for h in range(cfg.budget.max_jobs_per_day):
+            s.add(AgentJob(agent="auditor", model="m", prompt="x", status="succeeded", cost_usd=0.0,
+                           started_at=(NOW - pd.Timedelta(hours=h + 1)).to_pydatetime()))
+        s.commit()
+        chk = budget.check(s, "researcher", cfg, NOW)
+        assert not chk.ok and "jobs started in the last 24 hours" in chk.reason
+        assert budget.check(s, "researcher", cfg, NOW + pd.Timedelta(hours=24)).ok
+
+
+def test_failed_research_alerts_once_and_cools_down_before_refilling(arena, monkeypatch):
+    from autotrader.orchestrator import pipeline
+
+    sessions, archive, cfg, policy, _ = arena
+    alerts = []
+    monkeypatch.setattr(pipeline, "alert", lambda title, msg, **kw: alerts.append(title))
+
+    def broken(job, model, workspace, mcp_url, timeout, log_path):
+        log_path.write_text("")
+        return RunResult(1, False, error="PermissionError: nope")
+
+    run_ticks(arena, broken, 3)  # two attempts, then failed for good
+    with sessions() as s:
+        jobs = s.scalars(select(AgentJob)).all()
+        assert [(j.status, j.attempts) for j in jobs] == [("failed", 2)]  # no replacement queued
+        assert slots.recently_failed(s, "researcher", cfg)
+        s.add(AgentJob(agent="researcher", model="m", prompt="x", status="failed", attempts=2,
+                       result={"error": "PermissionError: nope", "attempt": 2}))
+        s.commit()
+    run_ticks(arena, broken, 1)
+    assert len(alerts) == 1  # the same failure again is only logged
+
+
+def test_parse_events_reads_the_exhausted_go_limit():
+    body = json.dumps({"type": "error", "error": {"type": "GoUsageLimitError", "message": "Go usage limit exceeded"},
+                       "metadata": {"limitName": "weekly"}})
+    lines = [json.dumps({"type": "error", "sessionID": "ses_q", "error": {
+        "type": "provider.quota", "message": "Go usage limit exceeded", "status": 429, "response": {"body": body}}})]
+    res = parse_events(lines)
+    assert res.error_type == "provider.quota" and res.quota_window == "weekly"

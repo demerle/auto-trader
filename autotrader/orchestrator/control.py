@@ -8,6 +8,7 @@ from autotrader.engine.state import set_state
 from autotrader.orchestrator.slots import research_prompt
 
 PAUSED = "agents_paused"  # set on provider auth errors or by hand; cleared by resume()
+QUOTA_HOLD = "agents_quota_hold"  # Go's usage limit is used up: no jobs until `until`; cleared by resume()
 INTERVALS = ("1m", "5m", "15m", "1h", "1d")
 
 
@@ -50,8 +51,8 @@ def pause(session: Session, reason: str) -> None:
 
 
 def resume(session: Session) -> bool:
-    row = session.get(SystemState, PAUSED)
-    if row is None:
-        return False
-    session.delete(row)
-    return True
+    """Clear a pause and any Go quota hold (the next job runs now)."""
+    rows = [r for r in (session.get(SystemState, PAUSED), session.get(SystemState, QUOTA_HOLD)) if r is not None]
+    for row in rows:
+        session.delete(row)
+    return bool(rows)

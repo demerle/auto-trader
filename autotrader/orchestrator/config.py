@@ -10,18 +10,12 @@ DEFAULT_PATH = Path(__file__).parent.parent / "config" / "agents.yaml"
 ROLES = ("researcher", "auditor", "reviewer", "supervisor", "options_researcher", "options_auditor")
 
 
-class Windows(BaseModel):
-    five_hours: float
-    week: float
-    month: float
-
-
 class Budget(BaseModel):
-    five_hours: float = 6.0
-    week: float = 15.0
-    month: float = 30.0
-    go_caps: Windows = Windows(five_hours=12.0, week=30.0, month=60.0)
-    go_guard: float = 0.9
+    five_hours: float = 3.0
+    week: float = 7.0
+    month: float = 15.0
+    max_jobs_per_day: int = 4  # agent jobs started in any 24 hours; reported cost undercounts Go usage
+    quota_retry_hours: dict[str, float] = {"weekly": 6.0, "monthly": 24.0, "default": 1.0}
     alert_at: float = 0.8
     seed_estimates: dict[str, float] = {"researcher": 1.5, "auditor": 0.4, "reviewer": 0.1,
                                         "supervisor": 0.02, "options_researcher": 1.5,
@@ -51,6 +45,7 @@ class AgentsConfig(BaseModel):
                                       "options_researcher": 45, "options_auditor": 15}
     max_attempts: int = 2
     concurrency: int = 1
+    refill_cooldown_hours: float = 6.0  # after research for a slot or seat fails for good, wait this long
     per_job: PerJob = PerJob()
     research_intervals: list[str] = ["1d", "1h", "15m", "5m"]
     min_history_sessions: int = 60

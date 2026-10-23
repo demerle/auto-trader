@@ -254,7 +254,7 @@ def submission_row(x: Submission) -> dict:
 def agents_overview(session: Session, cfg, policy, now: pd.Timestamp | None = None,
                     limit: int = 50) -> dict:
     from autotrader.orchestrator import budget, slots
-    from autotrader.orchestrator.loop import PAUSED
+    from autotrader.orchestrator.loop import PAUSED, QUOTA_HOLD
 
     chk = budget.check(session, "researcher", cfg, now)
     jobs = session.scalars(select(AgentJob).order_by(AgentJob.id.desc()).limit(limit)).all()
@@ -265,6 +265,8 @@ def agents_overview(session: Session, cfg, policy, now: pd.Timestamp | None = No
     return {
         "model": cfg.model,
         "paused": get_state(session, PAUSED) or None,
+        "quota_hold": get_state(session, QUOTA_HOLD) or None,
+        "jobs_today": budget.jobs_started(session, now or pd.Timestamp.now(tz="UTC")),
         "slots": {"total": policy.slots, "bots": len(slots.active_bots(session)),
                   "in_flight": slots.in_flight(session), "open": slots.open_slots(session, policy)},
         "budget": {"spend": chk.spend, "limits": chk.limits, "estimate": chk.estimate,
