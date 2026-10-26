@@ -30,6 +30,7 @@ class ChainArchive:
         df["quote_time"] = snap.quote_time
         df["fetched_at"] = snap.fetched_at
         df["spot"] = snap.spot
+        df["live"] = snap.live
         tmp = path.with_suffix(".tmp")
         df.to_parquet(tmp, index=False)
         tmp.replace(path)
@@ -46,10 +47,11 @@ class ChainArchive:
             if df.empty:
                 continue
             first = df.iloc[0]
-            chain = df.drop(columns=["quote_time", "fetched_at", "spot"])
+            chain = df.drop(columns=["quote_time", "fetched_at", "spot", "live"], errors="ignore")
             chain["expiry"] = pd.to_datetime(chain["expiry"]).dt.date
             out.append(ChainSnapshot(underlying.upper(), pd.Timestamp(first["fetched_at"]),
-                                     pd.Timestamp(first["quote_time"]), float(first["spot"]), chain))
+                                     pd.Timestamp(first["quote_time"]), float(first["spot"]), chain,
+                                     bool(first.get("live", False))))
         return out
 
     def latest(self, underlying: str) -> ChainSnapshot | None:

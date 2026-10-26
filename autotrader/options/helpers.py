@@ -2,7 +2,8 @@
 
 A `Chain` wraps one underlying's nowcast chain. Prices are per share; one contract
 is 100 shares. Columns: symbol, underlying, expiry (date), right ("C"/"P"), strike,
-bid, ask (CBOE, ~15 min old), mark, est_bid, est_ask (repriced at the live spot),
+bid, ask, mark (the mid), est_bid, est_ask (the real-time bid/ask; when only CBOE's
+delayed chain is available, its quotes repriced at the live spot),
 iv, delta, gamma, theta, vega, oi, volume.
 """
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, Protocol
 
 from autotrader.risk.limits import AssetInfo
@@ -19,6 +20,7 @@ class BrokerOrder:
     filled_qty: float = 0.0  # unsigned
     filled_avg_price: float | None = None
     legs: list[dict] | None = None  # mleg option orders: per-leg symbol/side/ratio/fills
+    filled_at: datetime | None = None
 
     @property
     def terminal(self) -> bool:

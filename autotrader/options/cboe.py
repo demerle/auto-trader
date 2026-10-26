@@ -39,6 +39,7 @@ class ChainSnapshot:
     quote_time: pd.Timestamp  # what the quotes reflect (fetched_at - delay)
     spot: float  # underlying price at quote_time
     chain: pd.DataFrame  # COLUMNS
+    live: bool = False  # real-time quotes (Schwab); CBOE's are delayed
 
 
 def parse(payload: dict, max_dte: int = 45, moneyness: float = 0.25,

@@ -9,8 +9,8 @@ structures it wants open, keyed by a tag it chooses:
   changed legs mean close-then-open (a roll);
 - returning None means "keep everything as it is".
 
-Strategies are pure: everything they may know is in the context (chains are CBOE's
-~15-minute-delayed IV repriced at the live underlying price). The engine computes
+Strategies are pure: everything they may know is in the context (chains carry real-time
+Schwab bid/ask; CBOE's delayed chain is only a fallback, during which nothing opens). The engine computes
 each structure's worst-case loss itself and refuses undefined risk, structures
 bigger than the risk limits, and anything that would let the bot lose more than
 its equity. Expiring contracts are closed before Alpaca's cutoff, and everything

@@ -1,9 +1,9 @@
 """Black-Scholes prices and greeks (vectorized), an IV solver, and the nowcast.
 
-CBOE's free chain is ~15 minutes old. The nowcast keeps each contract's delayed IV
-and reprices it at the live underlying price and the current time, so marks and
-limit prices aren't stale. The market's own pricing quirks are kept by adding the
-snapshot's (observed mid - model mid) back on top.
+A real-time chain (Schwab, `live`) is taken as is: mark = the NBBO mid, est_bid/est_ask =
+the real bid/ask. A delayed one (CBOE, ~15 minutes old) is nowcast: each contract keeps its
+delayed IV and is repriced at the live underlying price and the current time, with the
+snapshot's (observed mid - model mid) added back and the spread widened for staleness.
 """
 
 import numpy as np
@@ -90,9 +90,12 @@ def expiry_close(expiry) -> pd.Series:
     return (d + pd.Timedelta(hours=16)).dt.tz_localize("America/New_York").dt.tz_convert("UTC")
 
 
+LIVE_MAX_AGE_SEC = 120.0  # a real-time snapshot older than this is nowcast like a delayed one
+
+
 def nowcast(chain: pd.DataFrame, spot_then: float, spot_now: float, then: pd.Timestamp,
-            now: pd.Timestamp, r: float = RATE) -> pd.DataFrame:
-    """Reprice a delayed chain at the live spot. Adds mark, est_bid, est_ask and fresh greeks."""
+            now: pd.Timestamp, r: float = RATE, live: bool = False) -> pd.DataFrame:
+    """Price a chain at `now`. Adds mark, est_bid, est_ask and fresh greeks."""
     df = chain.copy()
     if df.empty:
         for c in ("mark", "est_bid", "est_ask"):
@@ -124,9 +127,15 @@ def nowcast(chain: pd.DataFrame, spot_then: float, spot_now: float, then: pd.Tim
     stale_min = max((now - then).total_seconds() / 60, 0.0)
     half = np.where(quoted, 0.5 * (ask - bid), np.maximum(0.05 * mark, 0.05))
     half = np.maximum(half, 0.005) * (1 + min(stale_min, 60) / 30)  # staler -> assume wider
+    est_bid, est_ask = np.maximum(mark - half, 0.0), mark + half
+    if live and (now - then).total_seconds() <= LIVE_MAX_AGE_SEC:
+        real = (ask > 0) & (ask >= bid) & (bid >= 0)
+        mark = np.where(real, 0.5 * (bid + ask), mark)
+        est_bid = np.where(real, bid, est_bid)
+        est_ask = np.where(real, ask, est_ask)
     df["mark"] = mark
-    df["est_bid"] = np.maximum(mark - half, 0.0)
-    df["est_ask"] = mark + half
+    df["est_bid"] = est_bid
+    df["est_ask"] = est_ask
     g = bs_greeks(spot_now, k, t_now, iv_fill, is_call, r)
     for name, arr in g.items():
         df[name] = np.where(good_iv, arr, df[name].to_numpy(float) if name in df else np.nan)

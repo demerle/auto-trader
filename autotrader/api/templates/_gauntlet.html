@@ -1,6 +1,6 @@
 {% macro trade_table(feed, show_bot=true) %}
 <div class="card table-wrap"><table>
-<tr><th>Time (ET)</th>{% if show_bot %}<th>Bot</th>{% endif %}<th>Action</th><th>Structure</th><th class="num">Qty</th><th>Status</th><th class="num">Price</th><th class="num">Mid</th><th>Why</th></tr>
+<tr><th>Time (ET)</th>{% if show_bot %}<th>Bot</th>{% endif %}<th>Action</th><th>Structure</th><th class="num">Qty</th><th>Status</th><th class="num">Price</th><th class="num">Mid</th><th class="num" title="Extra a real-money fill at the touch would have cost (shadow ledger)">Real-money cost</th><th>Why</th></tr>
 {% for t in feed %}
 <tr><td class="small">{{ t.time }}</td>
   {% if show_bot %}<td><a href="/options/bots/{{ t.bot }}">{{ t.bot }}</a></td>{% endif %}
@@ -8,9 +8,10 @@
   <td>{{ t.structure }} <span class="legs">[{{ t.tag }}]</span></td>
   <td class="num">{{ t.filled | fnum(0) }}/{{ t.qty }}</td>
   <td><span class="chip {{ t.status }}">{{ t.status }}</span>{% if t.chase %} <span class="muted small">chase {{ t.chase }}</span>{% endif %}</td>
-  <td class="num">{{ t.price | fnum }}</td><td class="num muted">{{ t.mid | fnum }}</td>
+  <td class="num">{{ t.price | fnum }}</td><td class="num muted">{{ t.mid | fnum }}{% if t.priced != "live" and t.status != "rejected" %}<div class="legs">{{ t.priced }}</div>{% endif %}</td>
+  <td class="num {{ 'neg' if t.real_cost and t.real_cost > 0.005 }}">{% if t.real_cost is not none %}{{ (-t.real_cost) | money(true) }}{% else %}<span class="muted">–</span>{% endif %}</td>
   <td class="small">{{ t.reason }}{% if t.error %} <span class="neg">{{ t.error | truncate(160) }}</span>{% endif %}</td></tr>
-{% else %}<tr><td colspan="9" class="muted">No trades yet.</td></tr>{% endfor %}
+{% else %}<tr><td colspan="10" class="muted">No trades yet.</td></tr>{% endfor %}
 </table></div>
 {% endmacro %}
 {% macro positions_table(rows) %}

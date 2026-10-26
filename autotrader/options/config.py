@@ -13,6 +13,7 @@ class ChainCfg(BaseModel):
     moneyness: float = 0.25
     refresh_sec: int = 300
     record: bool = True
+    strike_count: int = 80  # Schwab: strikes around the money per expiry
 
 
 class ExecCfg(BaseModel):
@@ -20,6 +21,9 @@ class ExecCfg(BaseModel):
     chase_steps: int = 4
     chase_frac: float = 0.25
     fee_per_contract: float = 0.05
+    require_live_quotes: bool = True  # no opens priced off delayed or stale quotes
+    quote_max_age_sec: float = 15.0
+    fill_latency_sec: float = 3.0  # shadow ledger: a fill this soon after submit took the submit-time touch
 
 
 class SmokeCfg(BaseModel):

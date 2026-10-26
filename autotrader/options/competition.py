@@ -23,6 +23,7 @@ from autotrader.engine.state import get_state, set_state
 from autotrader.options.config import GauntletConfig
 from autotrader.options.ledger import load_option_book
 from autotrader.options.roster import active_option_bots
+from autotrader.options.shadow import coverage, shadow_cost
 
 log = logging.getLogger(__name__)
 WEEK_STATE = "gauntlet_week"  # {"started": week, "scored": week, "session_counted": date}
@@ -240,8 +241,10 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
             thesis = registry.get(bot.strategy.name, bot.strategy.version).thesis
         except KeyError:
             thesis = ""
+        extra = shadow_cost(session, bot.id, since=r.started_at)
         rows.append({"result": r, "bot": bot, "slug": bot.slug, "end": float(end),
                      "ret": float(end) / r.start_equity - 1 if r.start_equity else 0.0,
+                     "shadow_ret": (float(end) - extra) / r.start_equity - 1 if r.start_equity else 0.0,
                      "max_dd": _max_drawdown(session, bot, r.started_at), "trades": len(trades),
                      "cullable": r.busted or r.sessions >= cfg.min_sessions_to_cull,
                      "busted": r.busted, "thesis": thesis, "sessions": r.sessions})
@@ -263,7 +266,7 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
         x["survived"] = rec["survived"]
     summary = {"week": week, "practice": practice, "standings": [
         {k: (round(v, 4) if isinstance(v, float) else v) for k, v in x.items()
-         if k in ("rank", "slug", "ret", "max_dd", "trades", "busted", "cullable", "sessions", "end", "record",
+         if k in ("rank", "slug", "ret", "shadow_ret", "max_dd", "trades", "busted", "cullable", "sessions", "end", "record",
                   "survived")}
         | {"culled": x["slug"] in doomed} for x in rows]}
     if not apply:
@@ -273,6 +276,7 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
     for x in rows:
         r, bot = x["result"], x["bot"]
         r.end_equity, r.ret, r.max_drawdown, r.trades = x["end"], x["ret"], x["max_dd"], x["trades"]
+        r.shadow_ret = x["shadow_ret"]
         r.rank, r.scored_at = x["rank"], utcnow()
         if x["slug"] in doomed:
             r.status = "culled"
@@ -292,11 +296,37 @@ def score_week(session: Session, now: pd.Timestamp, cfg: GauntletConfig, archive
     return summary
 
 
+LIVE_READY_WEEKS = 4
+LIVE_READY_COVERAGE = 0.95  # share of fills with a real-time quote behind their shadow price
+
+
+def live_ready(session: Session, bot_id: int, weeks: int = LIVE_READY_WEEKS) -> dict:
+    """Would this bot have made money with real money? Every one of its last `weeks` scored weeks must
+    have a positive shadow return (touch fills), with nearly every fill priced off a real-time quote.
+    A report only: nothing here turns on live trading."""
+    hist = session.scalars(select(WeeklyResult).where(WeeklyResult.bot_id == bot_id,
+                                                      WeeklyResult.scored_at.is_not(None))
+                           .order_by(WeeklyResult.week.desc()).limit(weeks)).all()
+    rets = [r.shadow_ret for r in hist]
+    out = {"ready": False, "weeks": [{"week": r.week, "ret": r.ret, "shadow_ret": r.shadow_ret} for r in hist]}
+    if len(hist) < weeks:
+        return out | {"why": f"{len(hist)}/{weeks} scored weeks"}
+    if any(x is None for x in rets):
+        return out | {"why": "a week without a shadow (real-money) result"}
+    if min(rets) <= 0:
+        return out | {"why": f"a losing week at real-money fills ({min(rets):+.1%})"}
+    priced, total = coverage(session, bot_id, since=hist[-1].started_at)
+    if total and priced / total < LIVE_READY_COVERAGE:
+        return out | {"why": f"only {priced}/{total} fills priced off a real-time quote"}
+    return out | {"ready": True, "why": f"{weeks} winning weeks at real-money fills"}
+
+
 def _announce(summary: dict) -> None:
     lines = [f"**Options Gauntlet, week of {summary['week']}**" + (" (practice, no cull)" if summary["practice"] else ""), ""]
     for s in summary["standings"]:
         flag = " ❌ CULLED" if s["culled"] else (" (exempt)" if not s["cullable"] else "")
-        lines.append(f"{s['rank']}. {s['slug']}: {s['ret']:+.1%} ({s['trades']} trades, max DD "
+        lines.append(f"{s['rank']}. {s['slug']}: {s['ret']:+.1%} (real money {s.get('shadow_ret', s['ret']):+.1%}; "
+                     f"{s['trades']} trades, max DD "
                      f"{s['max_dd']:.1%}){' BUSTED' if s['busted'] else ''}{flag}"
                      + ("" if s["culled"] else f" · {s['record']}"))
     culled = [s["slug"] for s in summary["standings"] if s["culled"]]

@@ -136,6 +136,10 @@ class Fill(Base):
     fees: Mapped[float] = mapped_column(Float, default=0.0)
     internal: Mapped[bool] = mapped_column(Boolean, default=False)  # crossed between bots
     filled_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Options shadow ledger: the price real money would have got (the touch, never better than the
+    # paper fill) and the NBBO it came from ({bid, ask, bid_size, ask_size, ts, basis}).
+    shadow_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quote: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class EquitySnapshot(Base):
@@ -313,6 +317,7 @@ class WeeklyResult(Base):
     start_equity: Mapped[float] = mapped_column(Float)
     end_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
     ret: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shadow_ret: Mapped[float | None] = mapped_column(Float, nullable=True)  # ret at real-money (touch) fills
     max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
     trades: Mapped[int] = mapped_column(Integer, default=0)
     sessions: Mapped[int] = mapped_column(Integer, default=0)  # sessions it traded this week

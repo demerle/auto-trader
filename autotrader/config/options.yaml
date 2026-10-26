@@ -20,12 +20,16 @@ chain:
   moneyness: 0.25           # strikes within +-25% of spot
   refresh_sec: 300          # CBOE refetch per underlying
   record: true              # keep every snapshot under data/options/
+  strike_count: 80          # Schwab chains: strikes around the money per expiry
 
 execution:
   chase_sec: 30             # reprice working orders this often
   chase_steps: 4            # then cancel; the strategy can ask again next tick
   chase_frac: 0.25          # each step moves the limit 25% of the spread toward the far side
   fee_per_contract: 0.05    # regulatory fees (Alpaca charges no options commission)
+  require_live_quotes: true # opens are priced off real-time Schwab NBBO only (never delayed/stale quotes)
+  quote_max_age_sec: 15
+  fill_latency_sec: 3       # shadow ledger: fills within this of submit took the submit-time touch
 
 smoke:                      # entry test for new bots: it must trade and respect the limits
   sessions: 20

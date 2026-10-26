@@ -1,4 +1,9 @@
-"""The options desk: one order per structure change, priced at the nowcast mid and chased.
+"""The options desk: one order per structure change, priced at the real-time NBBO mid and chased.
+
+Every order is re-quoted live (Schwab) just before it is sent: the limit starts at the NBBO mid and
+moves toward the far side each chase step. With no fresh real-time quote an opening order waits
+(execution.require_live_quotes); a closing one is priced off the chain instead. Each fill records the
+NBBO and its real-money (shadow) price; see shadow.py.
 
 Rules that keep the shared Alpaca account valid:
 - no two bots (or two tags) may hold opposite positions in the same contract, so every
@@ -25,6 +30,8 @@ from autotrader.options.helpers import Chain
 from autotrader.options.ledger import account_positions
 from autotrader.options.occ import parse
 from autotrader.options.planner import Change
+from autotrader.options.quotes import Quote, QuoteSource, leg_quotes
+from autotrader.options.shadow import shadow_prices
 
 log = logging.getLogger(__name__)
 INTERVAL = "opt"
@@ -57,9 +64,10 @@ def normalize(legs: list[tuple[str, int]]) -> tuple[list[tuple[str, int]], int]:
 
 
 class OptionsDesk:
-    def __init__(self, broker, cfg: GauntletConfig):
+    def __init__(self, broker, cfg: GauntletConfig, quotes: QuoteSource | None = None):
         self.broker = broker
         self.cfg = cfg
+        self.quotes = quotes
 
     @property
     def account(self) -> str:
@@ -97,6 +105,22 @@ class OptionsDesk:
         step = min(chase * self.cfg.execution.chase_frac, 1.0)
         return mid + (far - mid) * step, mid
 
+    def limit_from_quotes(self, legs: list[tuple[str, int]], quotes: dict[str, Quote],
+                          chase: int) -> tuple[float, float]:
+        """(limit, mid) per unit from live NBBO quotes."""
+        mid = sum(r * quotes[s].mid for s, r in legs)
+        far = sum(r * (quotes[s].ask if r > 0 else quotes[s].bid) for s, r in legs)
+        step = min(chase * self.cfg.execution.chase_frac, 1.0)
+        return mid + (far - mid) * step, mid
+
+    def live_quotes(self, legs: list[tuple[str, int]]) -> tuple[dict[str, Quote], list[str]]:
+        """(fresh quotes for every leg, or {}; the legs without one)."""
+        got = leg_quotes(self.quotes, legs)
+        now = pd.Timestamp.now(tz="UTC")
+        max_age = self.cfg.execution.quote_max_age_sec
+        missing = [s for s, _ in legs if s not in got or not got[s].usable(now, max_age)]
+        return ({} if missing else {s: got[s] for s, _ in legs}), missing
+
     # ----- orders -----
     def place(self, session: Session, bot: Bot, change: Change, chains: dict[str, Chain],
               chase: int = 0, market: bool = False) -> Placement:
@@ -113,9 +137,19 @@ class OptionsDesk:
                     return Placement(None, "conflict",
                                      f"{sym}: another bot holds the opposite side; use another strike")
         ratios, units = normalize(change.legs)
-        priced = None if market else self.limit_for(ratios, chains, chase)
-        if priced is None and not market:
-            return Placement(None, "deferred", "a leg is not in the current chain")
+        live: dict[str, Quote] = {}
+        if not market and self.quotes is not None:
+            live, missing = self.live_quotes(ratios)
+            if missing and opening and self.cfg.execution.require_live_quotes:
+                return Placement(None, "deferred", f"no fresh real-time quote for {', '.join(missing)}")
+        if market:
+            priced = None
+        elif live:
+            priced = self.limit_from_quotes(ratios, live, chase)
+        else:
+            priced = self.limit_for(ratios, chains, chase)
+            if priced is None:
+                return Placement(None, "deferred", "a leg is not in the current chain")
         limit, mid = priced if priced else (None, 0.0)
         und = parse(change.legs[0][0]).underlying
         order = Order(
@@ -126,12 +160,14 @@ class OptionsDesk:
         marks = {}
         for sym, _ in ratios:
             chain = chains.get(parse(sym).underlying)
-            m = chain.mark(sym) if chain is not None else None
+            m = live[sym].mid if sym in live else (chain.mark(sym) if chain is not None else None)
             if m is not None:
                 marks[sym] = round(m, 4)
         order.allocations = [OrderAllocation(bot_id=bot.id, qty=float(units), reason={
             "kind": change.kind, "reason": change.reason, "note": change.note, "tag": change.tag,
-            "intent": "open" if opening else "close", "leg_marks": marks})]
+            "intent": "open" if opening else "close", "leg_marks": marks,
+            "priced": "market" if market else ("live" if live else "chain"),
+            "nbbo": {s: q.as_dict() for s, q in live.items()}})]
         session.add(order)
         session.flush()
         try:
@@ -170,11 +206,14 @@ class OptionsDesk:
             if du > 1e-9:
                 alloc = order.allocations[0]
                 prices = self._leg_prices(order, bo)
-                for leg in legs:
-                    q = leg["ratio"] * du
-                    session.add(Fill(order_id=order.id, bot_id=alloc.bot_id, symbol=leg["symbol"], qty=q,
-                                     price=prices[leg["symbol"]], fees=fee * abs(q),
-                                     structure=order.structure))
+                inc = [(leg["symbol"], leg["ratio"] * du) for leg in legs]
+                quotes, basis = self._fill_quotes(order, bo, inc)
+                shadow = shadow_prices(inc, prices, quotes) if quotes else None
+                for sym, q in inc:
+                    quote = dict(quotes[sym], basis=basis) if sym in quotes else None
+                    session.add(Fill(order_id=order.id, bot_id=alloc.bot_id, symbol=sym, qty=q,
+                                     price=prices[sym], fees=fee * abs(q), structure=order.structure,
+                                     shadow_price=shadow[sym] if shadow else None, quote=quote))
                     new += 1
                 alloc.filled_qty += du
                 order.filled_notional = (bo.filled_avg_price or 0.0) * bo.filled_qty
@@ -183,6 +222,23 @@ class OptionsDesk:
             if bo.terminal and order.done_at is None:
                 order.done_at = utcnow()
         return new
+
+    def _fill_quotes(self, order: Order, bo, legs: list[tuple[str, float]]) -> tuple[dict[str, dict], str]:
+        """The NBBO a fill is judged against: at submit if it filled within fill_latency_sec (it was
+        marketable), else the live quote now (it rested; the first quote seen after the fill)."""
+        submitted = (order.allocations[0].reason or {}).get("nbbo") or {} if order.allocations else {}
+        created, filled = order.created_at, bo.filled_at
+        if submitted and created is not None and filled is not None:
+            c, f = pd.Timestamp(created), pd.Timestamp(filled)
+            c = c.tz_localize("UTC") if c.tzinfo is None else c
+            f = f.tz_localize("UTC") if f.tzinfo is None else f
+            if (f - c).total_seconds() <= self.cfg.execution.fill_latency_sec \
+                    and all(s in submitted for s, _ in legs):
+                return submitted, "submit"
+        live, missing = self.live_quotes([(s, 1) for s, _ in legs])
+        if live:
+            return {s: q.as_dict() for s, q in live.items()}, "observed"
+        return {}, "none"
 
     def _leg_prices(self, order: Order, bo) -> dict[str, float]:
         legs = order.legs or []

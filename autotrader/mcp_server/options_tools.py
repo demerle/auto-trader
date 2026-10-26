@@ -92,9 +92,12 @@ answer within 5 seconds. It is called every {cfg.tick_minutes} minutes from {cfg
   a neighbouring strike).
 
 ## Data and fills
-Chains are CBOE's free delayed quotes (~15 min old) repriced at the live underlying price
-(`mark`, `est_bid`, `est_ask`; IV and greeks recomputed). Orders start at the mid and are
-chased toward the far side for ~2 minutes, then cancelled (you can ask again next tick).
+Chains are real-time Schwab NBBO quotes: `mark` is the bid/ask mid, `est_bid`/`est_ask` the real
+bid/ask (IV and greeks recomputed at the live spot). If live quotes are down the engine falls back
+to CBOE's 15-minute-delayed chain and no bot may open anything until they return. Every order is
+re-quoted live, starts at the mid and is chased toward the far side for ~2 minutes, then
+cancelled (you can ask again next tick). Bots are also judged at real-money fills (buys at the
+ask, sells at the bid, size-limited): wide spreads and big orders in thin contracts cost you.
 Backtests use SYNTHETIC chains (VIX/VIX1D-based IV with skew, pessimistic spreads, fills at the
 far side), so treat backtest profits with suspicion; use them to check behaviour.
 CBOE volume / open interest are real live, but NaN in synthetic backtests.
@@ -178,7 +181,7 @@ not a clone of a survivor). Passing puts the bot straight into the gauntlet.
             return json.dumps({"weeks": weeks, "all_time": views.all_time(s)}, indent=1, default=str)
 
     def get_chain(self, underlying: str, expiry_index: int = 0, strikes: int = 8) -> str:
-        """The latest recorded (real, ~15 min delayed) chain for one underlying around the money."""
+        """The latest recorded real chain (Schwab real-time, or CBOE ~15 min delayed) for one underlying."""
         from autotrader.mcp_server.tools import ToolFailure
         from autotrader.options.archive import ChainArchive
         from autotrader.options.helpers import Chain
@@ -187,7 +190,7 @@ not a clone of a survivor). Passing puts the bot straight into the gauntlet.
         snap = ChainArchive().latest(underlying.upper())
         if snap is None:
             raise ToolFailure(f"no recorded chain for {underlying}")
-        df = nowcast(snap.chain, snap.spot, snap.spot, snap.quote_time, snap.quote_time)
+        df = nowcast(snap.chain, snap.spot, snap.spot, snap.quote_time, snap.quote_time, live=snap.live)
         c = Chain(snap.underlying, snap.spot, snap.quote_time, df, snap.quote_time.tz_convert("America/New_York").date())
         e = c.expiry(int(expiry_index))
         if e is None:

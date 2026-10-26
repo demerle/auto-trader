@@ -73,6 +73,7 @@ services:
     volumes:
       - bars:/app/data
       - ./autotrader/options/generated:/app/autotrader/options/generated:ro
+      - ./secrets/schwab:/app/secrets/schwab  # Schwab login token (renewed by `options schwab-login`)
     depends_on:
       migrate:
         condition: service_completed_successfully

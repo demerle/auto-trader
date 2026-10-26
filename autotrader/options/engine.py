@@ -1,6 +1,7 @@
 """The gauntlet's live engine: every 5 minutes each options bot sees fresh chains and trades.
 
-Per tick: sync fills -> refresh CBOE chains (recorded) and Yahoo bars -> nowcast ->
+Per tick: sync fills -> refresh chains (Schwab real-time, CBOE delayed as the fallback; recorded),
+live spot and Yahoo bars -> price the chains ->
 each bot: book from fills, context, strategy (sandboxed if agent-written), planner
 (cutoffs, Friday flat, risk), desk orders -> equity snapshots -> account drawdown check.
 """
@@ -28,6 +29,7 @@ from autotrader.options.ledger import account_positions, load_option_book
 from autotrader.options.occ import parse
 from autotrader.options.planner import Change, plan_tick
 from autotrader.options.pricing import nowcast
+from autotrader.options.quotes import QuoteSource
 from autotrader.options.roster import active_option_bots
 from autotrader.options.strategy import OptionStrategy
 from autotrader.risk.limits import RiskLimits
@@ -57,16 +59,20 @@ def week_last_session(now: pd.Timestamp) -> bool:
 class Gauntlet:
     def __init__(self, sessions: sessionmaker[Session], broker, archive, cfg: GauntletConfig,
                  limits: RiskLimits, chain_archive: ChainArchive | None = None,
-                 chain_fetcher=None, strategy_loader=None):
+                 chain_fetcher=None, strategy_loader=None, quotes: QuoteSource | None = None):
         self.sessions = sessions
         self.broker = broker
         self.archive = archive
         self.cfg = cfg
         self.limits = limits
         self.olimits = limits.options
-        self.desk = OptionsDesk(broker, cfg)
+        self.quotes = quotes
+        self.desk = OptionsDesk(broker, cfg, quotes)
         self.chain_archive = chain_archive or ChainArchive()
-        self.fetch_chain = chain_fetcher or (lambda u: cboe.fetch_chain(u, cfg.chain.max_dte, cfg.chain.moneyness))
+        if chain_fetcher is None:
+            fetch = quotes.chain if quotes is not None else cboe.fetch_chain
+            chain_fetcher = lambda u: fetch(u, cfg.chain.max_dte, cfg.chain.moneyness)  # noqa: E731
+        self.fetch_chain = chain_fetcher
         self.load_strategy = strategy_loader or self._load_strategy
         self._strategies: dict[tuple, OptionStrategy] = {}
         self._snaps: dict[str, cboe.ChainSnapshot] = {}
@@ -136,11 +142,29 @@ class Gauntlet:
                 spot[u] = float(b1["close"].iloc[-1])
             elif len(b5):
                 spot[u] = float(b5["close"].iloc[-1])
+        spot.update(self._live_spot(underlyings, now))
         levels = {}
         for sym in (VIX, VIX1D):
             b = self._bars(sym, "5m", 3)
             levels[sym] = float(b["close"].iloc[-1]) if len(b) else None
         return {"bars": bars, "daily": daily, "spot": spot, "vix": levels[VIX], "vix1d": levels[VIX1D]}
+
+    def _live_spot(self, underlyings, now: pd.Timestamp) -> dict[str, float]:
+        """Real-time last prices (Schwab); Yahoo's bars stand in for any symbol without a fresh one."""
+        if self.quotes is None or not underlyings:
+            return {}
+        try:
+            got = self.quotes.spot(list(underlyings))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("live spot: %s", exc)
+            return {}
+        max_age = self.cfg.execution.quote_max_age_sec
+        out = {}
+        for u, q in got.items():
+            price = q.last if q.last > 0 else (q.mid if q.bid > 0 else 0.0)
+            if price > 0 and q.age(now) <= max(max_age, 60):
+                out[u] = price
+        return out
 
     def chains_now(self, spot: dict[str, float], now: pd.Timestamp) -> dict[str, Chain]:
         out = {}
@@ -148,7 +172,7 @@ class Gauntlet:
         for u, snap in self._snaps.items():
             if u not in spot:
                 continue
-            df = nowcast(snap.chain, snap.spot, spot[u], snap.quote_time, now)
+            df = nowcast(snap.chain, snap.spot, spot[u], snap.quote_time, now, live=snap.live)
             out[u] = Chain(u, spot[u], snap.quote_time, df, today)
         return out
 

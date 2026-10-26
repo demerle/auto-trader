@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     alpaca_options_secret_key: str | None = Field(
         None, validation_alias=AliasChoices("ALPACA_OPTIONS_SECRET_KEY", "AT_ALPACA_OPTIONS_SECRET_KEY"))
 
+    # Schwab Trader API (Individual): the options gauntlet's real-time quote feed (Alpaca only trades).
+    # The token file is written by `autotrader options schwab-login` and must be renewed every 7 days.
+    schwab_app_key: str | None = None
+    schwab_app_secret: str | None = None
+    schwab_callback_url: str = "https://127.0.0.1:8182"
+    schwab_token_path: Path = Path("secrets/schwab/token.json")
+
     risk_file: Path = Path(__file__).parent / "risk.yaml"
     bots_file: Path = Path(__file__).parent / "bots.yaml"
     options_file: Path = Path(__file__).parent / "options.yaml"

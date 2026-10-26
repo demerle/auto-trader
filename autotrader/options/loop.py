@@ -79,6 +79,7 @@ def step(g: Gauntlet, now: pd.Timestamp, state: dict) -> dict:
             g.refresh_chains(cfg.universe)
         if time.monotonic() - state.get("reconciled", 0) > 600:
             state["reconciled"] = time.monotonic()
+            _warn_login_expiry(g, now, state)
             try:
                 drift, stock = g.reconcile()
                 if drift:
@@ -106,6 +107,22 @@ def step(g: Gauntlet, now: pd.Timestamp, state: dict) -> dict:
                     competition.fill_slots(session, cfg, "replace culled bots")
                 session.commit()
     return state
+
+
+def _warn_login_expiry(g: Gauntlet, now: pd.Timestamp, state: dict) -> None:
+    """Once a day while the Schwab login has under a day left (without it nothing can open)."""
+    from autotrader.options.quotes import token_expires
+
+    exp = token_expires(g.quotes)
+    day = now.tz_convert("America/New_York").date().isoformat()
+    if exp is None or exp - now > pd.Timedelta(days=1) or state.get("login_warned") == day:
+        return
+    state["login_warned"] = day
+    left = exp - now
+    alert("Schwab login expires soon" if left > pd.Timedelta(0) else "Schwab login expired",
+          f"The real-time quote login {'expires' if left > pd.Timedelta(0) else 'expired'} "
+          f"{exp.tz_convert('America/New_York'):%a %H:%M} ET. Without it no options bot can open a position. "
+          "Renew: `autotrader options schwab-login` (in the options-engine container).", priority="high")
 
 
 def run_forever(g: Gauntlet, poll_sec: float = 10.0) -> None:

@@ -20,12 +20,23 @@ def gauntlet():
     from autotrader.data.archive import BarArchive
     from autotrader.db.session import session_factory
     from autotrader.options.config import load_gauntlet_config
+    from autotrader.alerts import alert
     from autotrader.options.engine import Gauntlet
+    from autotrader.options.quotes import quote_source_from_settings
     from autotrader.risk.limits import load_limits
 
     cfg = load_gauntlet_config()
     return Gauntlet(session_factory(), AlpacaBroker.options_from_settings(cfg.account), BarArchive(), cfg,
-                    load_limits(get_settings().risk_file))
+                    load_limits(get_settings().risk_file),
+                    quotes=quote_source_from_settings(cfg.chain.strike_count, alert=alert))
+
+
+def _quote_source():
+    from autotrader.options.config import load_gauntlet_config
+    from autotrader.options.quotes import quote_source_from_settings
+
+    cfg = load_gauntlet_config()
+    return cfg, quote_source_from_settings(cfg.chain.strike_count)
 
 
 @options_app.command("engine")
@@ -44,17 +55,19 @@ def engine(once: bool = typer.Option(False, help="Run one tick now and exit"),
 
 @options_app.command("chain")
 def chain(symbol: str, expiry: int = typer.Option(0, help="n-th expiry"), width: int = 5) -> None:
-    """Fetch a CBOE chain and show the strikes around the money (nowcast at CBOE's own spot)."""
-    from autotrader.options.cboe import fetch_chain
+    """Fetch a chain the way the engine does (Schwab real-time, else CBOE delayed) and show the strikes
+    around the money."""
     from autotrader.options.helpers import Chain
     from autotrader.options.pricing import nowcast
 
-    snap = fetch_chain(symbol)
+    cfg, source = _quote_source()
+    snap = source.chain(symbol, cfg.chain.max_dte, cfg.chain.moneyness)
     now = pd.Timestamp.now(tz="UTC")
-    df = nowcast(snap.chain, snap.spot, snap.spot, snap.quote_time, max(now, snap.quote_time))
+    df = nowcast(snap.chain, snap.spot, snap.spot, snap.quote_time, max(now, snap.quote_time), live=snap.live)
     c = Chain(snap.underlying, snap.spot, snap.quote_time, df, now.tz_convert("America/New_York").date())
     e = c.expiry(expiry)
-    typer.echo(f"{snap.underlying} spot {snap.spot} | quotes as of {snap.quote_time.tz_convert('America/New_York'):%Y-%m-%d %H:%M} ET "
+    typer.echo(f"{snap.underlying} spot {snap.spot} | {'REAL-TIME (Schwab)' if snap.live else 'DELAYED (CBOE)'} "
+               f"quotes as of {snap.quote_time.tz_convert('America/New_York'):%Y-%m-%d %H:%M:%S} ET "
                f"| {len(snap.chain)} contracts | expiries {[str(x) for x in c.expiries()[:6]]}")
     if e is None:
         return
@@ -65,18 +78,50 @@ def chain(symbol: str, expiry: int = typer.Option(0, help="n-th expiry"), width:
         typer.echo(rows[["symbol", "bid", "ask", "mark", "iv", "delta", "oi", "volume"]].to_string(index=False))
 
 
+@options_app.command("schwab-login")
+def schwab_login() -> None:
+    """Log in to Schwab (renew every 7 days): open the printed URL, log in, paste the address you land on.
+
+    Works headless (e.g. over SSH on the server): the redirect page will not load; copy its URL anyway."""
+    from schwab import auth
+
+    from autotrader.config import get_settings
+
+    s = get_settings()
+    if not (s.schwab_app_key and s.schwab_app_secret):
+        raise typer.BadParameter("set AT_SCHWAB_APP_KEY and AT_SCHWAB_APP_SECRET in .env first")
+    s.schwab_token_path.parent.mkdir(parents=True, exist_ok=True)
+    auth.client_from_manual_flow(s.schwab_app_key, s.schwab_app_secret, s.schwab_callback_url,
+                                 str(s.schwab_token_path))
+    typer.echo(f"token saved to {s.schwab_token_path}; it expires in 7 days")
+
+
+@options_app.command("quote")
+def quote(symbols: list[str]) -> None:
+    """Live quotes (OCC option symbols or stock tickers) from the engine's quote source."""
+    from autotrader.options.occ import is_option
+
+    _, source = _quote_source()
+    opts = [x for x in symbols if is_option(x)]
+    got = source.quotes(opts) | source.spot([x for x in symbols if not is_option(x)])
+    now = pd.Timestamp.now(tz="UTC")
+    for sym in symbols:
+        q = got.get(sym)
+        typer.echo(f"{sym}: no live quote" if q is None else
+                   f"{sym}: bid {q.bid} x{q.bid_size:g} / ask {q.ask} x{q.ask_size:g} last {q.last} "
+                   f"({q.age(now):.0f}s old)")
+
+
 @options_app.command("record")
 def record() -> None:
     """Fetch and store one chain snapshot for every underlying in the universe."""
     from autotrader.options.archive import ChainArchive
-    from autotrader.options.cboe import fetch_chain
-    from autotrader.options.config import load_gauntlet_config
 
-    cfg = load_gauntlet_config()
+    cfg, source = _quote_source()
     arch = ChainArchive()
     for u in cfg.universe:
         try:
-            snap = fetch_chain(u, cfg.chain.max_dte, cfg.chain.moneyness)
+            snap = source.chain(u, cfg.chain.max_dte, cfg.chain.moneyness)
             typer.echo(f"{u}: {len(snap.chain)} contracts -> {arch.save(snap)}")
         except Exception as exc:  # noqa: BLE001
             typer.echo(f"{u}: {exc}")

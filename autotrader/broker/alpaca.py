@@ -37,6 +37,7 @@ def _to_order(o) -> BrokerOrder:
         filled_qty=float(o.filled_qty or 0),
         filled_avg_price=float(o.filled_avg_price) if o.filled_avg_price else None,
         legs=legs,
+        filled_at=o.filled_at,
     )
 
 

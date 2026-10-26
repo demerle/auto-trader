@@ -5,13 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from autotrader.data.calendar import schedule
-from autotrader.db.models import OPTIONS, Bot, BotStage, EquitySnapshot, Order, WeeklyResult
+from autotrader.db.models import OPTIONS, Bot, BotStage, EquitySnapshot, Fill, Order, WeeklyResult
 from autotrader.engine.state import KILL_SWITCH, account_key, get_state
-from autotrader.options.competition import record_text, track_records, week_bounds, week_of
+from autotrader.options.competition import live_ready, record_text, track_records, week_bounds, week_of
 from autotrader.options.config import GauntletConfig, load_gauntlet_config
 from autotrader.options.ledger import load_option_book
 from autotrader.options.occ import parse
 from autotrader.options.risk import worst_value
+from autotrader.options.shadow import shadow_cost
 
 RIGHT = {"C": "call", "P": "put"}
 
@@ -109,6 +110,7 @@ def standings(session: Session, now: pd.Timestamp | None = None, cfg: GauntletCo
         trades = sum(1 for c in load_option_book(session, bot).closed
                      if c.closed_at is not None and c.closed_at >= _utc(since))
         positions = (snap.positions if snap else {}) or {}
+        extra = shadow_cost(session, bot_id, since=since)
         status = r.status if r else "waiting"
         if r is not None and r.status == "running":
             status = "busted" if r.busted else ("paused" if bot.paused_until and _utc(bot.paused_until) > now
@@ -117,6 +119,8 @@ def standings(session: Session, now: pd.Timestamp | None = None, cfg: GauntletCo
         rows.append({"slug": bot.slug, "strategy": f"{bot.strategy.name}@{bot.strategy.version}",
                      "author": bot.strategy.author, "start": start, "equity": equity,
                      "ret": equity / start - 1 if start else 0.0, "day_pnl": equity - prev,
+                     "shadow_cost": extra, "shadow_ret": (equity - extra) / start - 1 if start else 0.0,
+                     "live_ready": live_ready(session, bot_id),
                      "trades": trades, "open": len(positions), "open_risk": open_risk(positions),
                      "positions": positions, "status": status, "busted": bool(r and r.busted),
                      "rank_final": r.rank if r else None, "max_dd": r.max_drawdown if r else None,
@@ -146,8 +150,15 @@ def trade_feed(session: Session, limit: int = 100, bot_slug: str | None = None, 
     if since is not None:
         q = q.where(Order.created_at >= since)
     slugs = {b.id: b.slug for b in session.scalars(select(Bot).where(Bot.group == OPTIONS))}
+    orders = list(session.scalars(q))
+    real: dict[int, list[float]] = {}  # order id -> [paper notional, real-money notional, priced?]
+    for f in session.scalars(select(Fill).where(Fill.order_id.in_([o.id for o in orders]))):
+        x = real.setdefault(f.order_id, [0.0, 0.0, 1.0])
+        x[0] += f.qty * f.price
+        x[1] += f.qty * (f.shadow_price if f.shadow_price is not None else f.price)
+        x[2] = x[2] if f.shadow_price is not None else 0.0
     out = []
-    for o in session.scalars(q):
+    for o in orders:
         a = o.allocations[0] if o.allocations else None
         slug = slugs.get(a.bot_id, "?") if a else "?"
         if bot_slug and slug != bot_slug:
@@ -157,11 +168,15 @@ def trade_feed(session: Session, limit: int = 100, bot_slug: str | None = None, 
         legs = o.legs or []
         filled_units = (o.filled_qty / abs(legs[0]["ratio"]) if len(legs) == 1 and legs else o.filled_qty)
         price = (o.filled_notional / o.filled_qty) if o.filled_qty else o.limit_price
+        paper, money, priced = real.get(o.id, (0.0, 0.0, 0.0))
+        # Dollars real money would have lost on this order vs the paper fill (None: no real-time quote).
+        real_cost = (money - paper) * 100 if o.filled_qty and priced else None
         out.append({"id": o.id, "time": f"{_utc(o.created_at).tz_convert('America/New_York'):%a %m-%d %H:%M:%S}",
                     "ts": _utc(o.created_at).isoformat(), "bot": slug, "tag": o.structure or "",
                     "intent": reason.get("intent", "?"), "structure": describe([[x["symbol"], x["ratio"]] for x in legs]),
                     "qty": int(units), "filled": filled_units, "status": o.status, "price": price,
                     "limit": o.limit_price, "mid": o.ref_price, "chase": o.chase,
+                    "real_cost": real_cost, "priced": reason.get("priced", "chain"),
                     "reason": reason.get("reason", "") + (f": {reason['note']}" if reason.get("note") else ""),
                     "error": reason.get("error")})
         if len(out) >= limit:
